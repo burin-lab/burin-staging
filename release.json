@@ -1,10 +1,10 @@
 {
-  "release": "20261113-2cad32d3",
-  "source": "2cad32d386781c71dea82e8be4b2abc11b34c68e",
-  "built": "2026-11-13T04:09:37Z",
-  "cache": "burin-staging-v4",
+  "release": "20261113-4bac0197",
+  "source": "4bac01979380f97d4b4e2e1c0d817e17834cb98b",
+  "built": "2026-11-13T06:28:13Z",
+  "cache": "burin-staging-v5",
   "files": {
-    "index.html": "7b430bbed94f52db08dc166b9890ccc96691af99e5618477933fe54db5d1fac0",
+    "index.html": "512dbb82d38598aae55af229ace10450a079796cd6a62f6eb14b36f704308129",
     "m/cas.js": "28e9fa9ec3554d5872706a6fbca82b697b5813f0019feb89e954071d4dbd936d",
     "m/cite.js": "fb590632ec78bc00a866ecde448378e35d0de65f614d7a24b0fbb722c5ff577c",
     "m/data.js": "937ec615df5d6dcf3f94fe6eb4c5ccc3c2660e505c16050f9a9ae09349694ec7",
