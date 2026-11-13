@@ -1,10 +1,10 @@
 {
-  "release": "20261113-67913d8d",
-  "source": "67913d8d88b53283c3c9498ab8d4947e3b15da23",
-  "built": "2026-11-13T04:02:57Z",
-  "cache": "burin-staging-v3",
+  "release": "20261113-2cad32d3",
+  "source": "2cad32d386781c71dea82e8be4b2abc11b34c68e",
+  "built": "2026-11-13T04:09:37Z",
+  "cache": "burin-staging-v4",
   "files": {
-    "index.html": "2c85710f84805a7ccf377d5167cd1f3c48c20bc4daffb49f6b24d760070aada9",
+    "index.html": "7b430bbed94f52db08dc166b9890ccc96691af99e5618477933fe54db5d1fac0",
     "m/cas.js": "28e9fa9ec3554d5872706a6fbca82b697b5813f0019feb89e954071d4dbd936d",
     "m/cite.js": "fb590632ec78bc00a866ecde448378e35d0de65f614d7a24b0fbb722c5ff577c",
     "m/data.js": "937ec615df5d6dcf3f94fe6eb4c5ccc3c2660e505c16050f9a9ae09349694ec7",
@@ -15,7 +15,5 @@
     "m/stats.js": "95bf87c5e98adcb0b2343d801679153b17320746bf927444dd74027156c79e55",
     "m/video.js": "988074ca01631c0ffbaee16b311747ab031dbf90bf3e306e517a2971a157d256",
     "m/work.js": "de51dc4bb719952ba0c815a517631bb849bdf0251d385d51ba5f1c5834cead80"
-  },
-  "rolled_back_from": "20261113-b83423cf",
-  "rolled_back": "2026-11-13T04:06:18Z"
+  }
 }
