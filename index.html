@@ -1701,6 +1701,20 @@ body.hastabs .top .title > * { display: none; }
 .nbtop .libpath b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .shelfh { grid-column: 1 / -1; margin: 8px 0 0 !important; }
 .shelfnote { grid-column: 1 / -1; }
+/* words found inside pages (task 8.1): one row per page under the notebook it is in */
+.findbox { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.findbox .findh { margin: 8px 0 0 !important; }
+.findbox .findst { margin: 0; }
+.findlist { display: flex; flex-direction: column; gap: 12px; }
+.findnb { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.findnb > b { font-size: 15px; overflow-wrap: break-word; word-break: normal; line-break: auto; }
+.findhit { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%; min-height: 44px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); color: var(--fg); font: inherit; text-align: left; cursor: pointer; }
+.findhit:hover, .findhit:focus-visible { border-color: var(--accent); }
+.findpg { font-size: 13px; color: var(--muted); max-width: 100%; overflow-wrap: break-word; word-break: normal; line-break: auto; }
+.findtx { font-size: 15px; line-height: 1.5; max-width: 100%; overflow-wrap: break-word; word-break: normal; line-break: auto; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.findtx mark { background: var(--warn-soft); color: var(--fg); border-radius: 3px; padding: 0 1px; font-weight: 600; }
+.item.findglow { animation: findglow 2.6s ease-out; }
+@keyframes findglow { 0%, 60% { box-shadow: 0 0 0 4px var(--wglow), 0 0 18px 6px rgba(242, 196, 107, 0.55); } 100% { box-shadow: 0 0 0 0 rgba(242, 196, 107, 0); } }
 .bcard, .fcard { position: relative; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .bline { display: flex; align-items: flex-start; gap: 2px; min-width: 0; }
 .bline .bmeta { flex: 1 1 auto; }
@@ -2822,6 +2836,8 @@ async function makeLocalStore() {
     watchCollection(path, cb) { const f = () => cb(many(path), meta); subs.add(f); setTimeout(f, 0); return () => subs.delete(f); },
     watchDoc(path, cb) { const f = () => cb(one(path), meta); subs.add(f); setTimeout(f, 0); return () => subs.delete(f); },
     async get(path) { return one(path); },
+    /* the saved object itself, not a copy: only for reading (the search in every notebook), never to be changed */
+    peek(path) { return data[path] || null; },
     async list(path) { return many(path); },
     async set(path, d) { write(path, clone(d)); },
     async update(path, d) { if (!data[path]) throw { code: 'invalid_argument' }; write(path, Object.assign(clone(data[path]), clone(d))); },
@@ -3098,6 +3114,8 @@ async function makeCloudStore(sb, user) {
     watchCollection(path, cb) { const f = () => cb(many(path), meta); subs.add(f); setTimeout(f, 0); return () => subs.delete(f); },
     watchDoc(path, cb) { const f = () => cb(one(path), meta); subs.add(f); setTimeout(f, 0); return () => subs.delete(f); },
     async get(path) { return one(path); },
+    /* the saved object itself, not a copy: only for reading (the search in every notebook), never to be changed */
+    peek(path) { return data[path] || null; },
     async list(path) { return many(path); },
     async set(path, d) { write(path, clone(d)); },
     async update(path, d) { if (!data[path]) throw { code: 'invalid_argument' }; write(path, Object.assign(clone(data[path]), clone(d))); },
@@ -9300,6 +9318,8 @@ function renderLibrary() {
   if (LIBV.folder && !FOLDERS.list.some((f) => f.id === LIBV.folder)) LIBV.folder = null;
   document.querySelectorAll('#libView button').forEach((b) => b.setAttribute('aria-pressed', b.dataset.v === LIBV.view ? 'true' : 'false'));
   const q = (($('#nbFind') || {}).value || '').trim().toLowerCase();
+  { const fi = $('#nbFind'); if (fi) fi.placeholder = flagOn('search') ? 'ค้นหาสมุดและข้อความ' : 'ค้นหาสมุด'; }
+  if (!q) { LIBV.findQ = ''; LIBV.findBox = null; }
   const path = $('#libPath');
   if (path) {
     path.innerHTML = '';
@@ -9338,10 +9358,23 @@ function renderLibrary() {
     return;
   }
   if (!S.nbs.length) { empty('ยังไม่มีสมุด กดสร้างสมุดเล่มใหม่'); return; }
-  if (!shown.length && !folders.length) { empty(q ? 'ไม่พบสมุดที่ตรงกับคำค้น' : LIBV.view === 'fav' ? 'ยังไม่มีรายการโปรด แตะรูปดาวที่มุมปกสมุดหรือโฟลเดอร์เพื่อเพิ่ม' : LIBV.folder ? 'โฟลเดอร์นี้ยังว่าง ลากสมุดมาวางบนโฟลเดอร์ หรือกดปุ่มจุดสามจุดที่สมุดแล้วเลือกย้ายไปโฟลเดอร์' : 'สมุดทุกเล่มอยู่ในโฟลเดอร์แล้ว'); return; }
+  if (!shown.length && !folders.length) { if (q && flagOn('search')) { empty('ไม่พบชื่อสมุดที่ตรงกับคำค้น'); libFind(el, q); return; } empty(q ? 'ไม่พบสมุดที่ตรงกับคำค้น' : LIBV.view === 'fav' ? 'ยังไม่มีรายการโปรด แตะรูปดาวที่มุมปกสมุดหรือโฟลเดอร์เพื่อเพิ่ม' : LIBV.folder ? 'โฟลเดอร์นี้ยังว่าง ลากสมุดมาวางบนโฟลเดอร์ หรือกดปุ่มจุดสามจุดที่สมุดแล้วเลือกย้ายไปโฟลเดอร์' : 'สมุดทุกเล่มอยู่ในโฟลเดอร์แล้ว'); return; }
   const ids = shown.map((n) => n.id);
   for (const nb of shown) nbCard(nb, el, ids);
+  if (q) libFind(el, q);
   nbSelBar(shown);
+}
+/* the words inside the pages of every notebook, under the notebooks found by name (a part loaded on first use).
+   The library is drawn again on every letter typed and when another device saves: the same words keep their results */
+function libFind(el, q) {
+  if (!flagOn('search')) return;
+  if (LIBV.findQ === q && LIBV.findBox) { el.appendChild(LIBV.findBox); return; }
+  const box = document.createElement('div'); box.className = 'findbox'; LIBV.findQ = q; LIBV.findBox = box; el.appendChild(box);
+  clearTimeout(LIBV.findT);
+  LIBV.findT = setTimeout(() => {
+    if (LIBV.findBox !== box) return;
+    need('search').then(() => { if (LIBV.findBox === box && box.isConnected) findShow(q, box); }, () => { if (LIBV.findBox === box) box.remove(); });
+  }, 250);
 }
 /* pick several notebooks at once: long-press a cover or tap Select, then favourite, move, or delete them together */
 function nbToggleSel(id) { if (!LIBV.sel) LIBV.sel = new Set(); if (LIBV.sel.has(id)) LIBV.sel.delete(id); else LIBV.sel.add(id); renderLibrary(); }
@@ -10718,7 +10751,7 @@ function researchTemplate() {
 /* parts that are not needed to open a notebook and write are loaded the first time they are used (moving models,
    the equation solver, drawing from a reference, statistics), so the app opens fast and stays fast however much is added.
    Each part is kept for offline use by the service worker */
-const MODS = { scene: 'm/scene.js', cas: 'm/cas.js', sketch: 'm/sketch.js', stats: 'm/stats.js', video: 'm/video.js', data: 'm/data.js', measure: 'm/measure.js', imgmeas: 'm/imgmeas.js', cite: 'm/cite.js', work: 'm/work.js' }, MODP = {}, MODOK = {}, MODEV = {};
+const MODS = { scene: 'm/scene.js', cas: 'm/cas.js', sketch: 'm/sketch.js', stats: 'm/stats.js', video: 'm/video.js', data: 'm/data.js', measure: 'm/measure.js', imgmeas: 'm/imgmeas.js', cite: 'm/cite.js', work: 'm/work.js', search: 'm/search.js' }, MODP = {}, MODOK = {}, MODEV = {};
 /* switches to turn a part of the app off without putting a new release up: flags.json next to index.html,
    for example {"off": ["video"]}. Read once when the app opens; when it cannot be read, everything stays on */
 const FLAGS = { off: {}, told: {} };
@@ -10745,11 +10778,12 @@ function need(name) {
   }).catch((e) => { delete MODP[name]; throw e; }));
 }
 let SCENE_TPL, SCN, LIFE, renderScenePicker, scClean, scRender, restoreInk, openMotionPick, insertScene, buildScene, buildLife, sceneDomainFor, lifeBox, animKick, scReset;
+let findShow, findRun, findGo;
 let texToCas, casVars, casWithUnits, casRun, casRowTex, casReady, solveSelection, openBgCut, openSketch, ST, openStats, openVideoLab, dataSelection, poolSection, poolShow, poolGot, poolEnd, openMeasure, openImgMeasure, unitCheck, openCite, captionSel, captionRenumber, hwHubOpen, hwStudentOpen, hwAssignOpen, hwBoard, hwDetail;
 const MOD_EXPORTS = {
   scene: ['SCENE_TPL', 'SCN', 'LIFE', 'renderScenePicker', 'scClean', 'scRender', 'restoreInk', 'openMotionPick', 'insertScene', 'buildScene', 'buildLife', 'sceneDomainFor', 'lifeBox', 'animKick', 'scReset'],
   cas: ['texToCas', 'casVars', 'casWithUnits', 'casRun', 'casRowTex', 'casReady', 'solveSelection'],
-  sketch: ['openBgCut', 'openSketch'], stats: ['ST', 'openStats'], video: ['openVideoLab'], data: ['dataSelection', 'poolSection', 'poolShow', 'poolGot', 'poolEnd', 'unitCheck'], measure: ['openMeasure'], imgmeas: ['openImgMeasure'], cite: ['openCite', 'captionSel', 'captionRenumber'], work: ['hwHubOpen', 'hwStudentOpen', 'hwAssignOpen', 'hwBoard', 'hwDetail']
+  sketch: ['openBgCut', 'openSketch'], stats: ['ST', 'openStats'], video: ['openVideoLab'], data: ['dataSelection', 'poolSection', 'poolShow', 'poolGot', 'poolEnd', 'unitCheck'], measure: ['openMeasure'], imgmeas: ['openImgMeasure'], cite: ['openCite', 'captionSel', 'captionRenumber'], work: ['hwHubOpen', 'hwStudentOpen', 'hwAssignOpen', 'hwBoard', 'hwDetail'], search: ['findShow', 'findRun', 'findGo']
 };
 function modSet(name, x) {
   if (name === 'scene') { SCENE_TPL = x.SCENE_TPL; SCN = x.SCN; LIFE = x.LIFE; renderScenePicker = x.renderScenePicker; scClean = x.scClean; scRender = x.scRender; restoreInk = x.restoreInk; openMotionPick = x.openMotionPick; insertScene = x.insertScene; buildScene = x.buildScene; buildLife = x.buildLife; sceneDomainFor = x.sceneDomainFor; lifeBox = x.lifeBox; animKick = x.animKick; scReset = x.scReset; }
@@ -10761,6 +10795,7 @@ function modSet(name, x) {
   else if (name === 'measure') { openMeasure = x.openMeasure; }
   else if (name === 'imgmeas') { openImgMeasure = x.openImgMeasure; }
   else if (name === 'cite') { openCite = x.openCite; captionSel = x.captionSel; captionRenumber = x.captionRenumber; }
+  else if (name === 'search') { findShow = x.findShow; findRun = x.findRun; findGo = x.findGo; }
   else if (name === 'work') { hwHubOpen = x.hwHubOpen; hwStudentOpen = x.hwStudentOpen; hwAssignOpen = x.hwAssignOpen; hwBoard = x.hwBoard; hwDetail = x.hwDetail; }
 }
 /* a moving model or moving drawing on a page while its part is still loading: a quiet box of the same size, then the real one */
@@ -21113,7 +21148,7 @@ async function deckExportPptx() {
 }
 
 /* ---------- new version notice (own website only) ---------- */
-const BUILD = '1794558810';
+const BUILD = '1794637174';
 let updShown = false;
 async function checkUpdate() {
   if (BUILD.startsWith('__') || (window.claude && window.claude.use) || updShown || !navigator.onLine) return;
@@ -21131,8 +21166,8 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) chec
 setInterval(checkUpdate, 30 * 60 * 1000); setTimeout(checkUpdate, 8000);
 
 /* ---------- version and what is new ---------- */
-const VERSION = '20261113-4fc1a95e';
-const NEWS = [{"id": 1, "date": "2026-11-13", "items": ["ดูเวอร์ชันของแอปได้ที่เมนู แท็บตั้งค่า หัวข้อเกี่ยวกับแอป", "เมื่อมีเวอร์ชันใหม่ระหว่างใช้งาน แอปจะไม่รีโหลดเอง รวมถึงจอผู้ชม เวอร์ชันใหม่จะมีผล เมื่อเปิดแอปครั้งถัดไป หรือเมื่อแตะแถบ มีเวอร์ชันใหม่", "หน้าที่เปิดค้างไว้ ใช้ส่วนต่าง ๆ ของแอป จากเวอร์ชันเดียวกับตัวเองเสมอ ไม่ปนกับเวอร์ชันใหม่", "เมื่อแอปทำงานผิดพลาด แอปจะส่งรายงาน ให้ผู้พัฒนา โดยส่งเฉพาะ ข้อความแจ้งข้อผิดพลาด ตำแหน่งในโค้ด รุ่นเครื่อง และเวอร์ชันของแอป ไม่ส่งเนื้อหาสมุด ชื่อ หรืออีเมล"]}];
+const VERSION = '20261114-49b28599';
+const NEWS = [{"id": 2, "date": "2026-11-14", "items": ["ค้นหาข้อความ ในทุกสมุดได้แล้ว พิมพ์คำในช่องค้นหาที่เมนู แอปจะค้นทั้งชื่อสมุด ข้อความที่พิมพ์ ลายมือที่แปลงเป็นตัวพิมพ์แล้ว หัวเรื่องของหน้า และข้อความในกล่องต่าง ๆ", "แตะผลการค้นหา เพื่อไปที่หน้านั้น กล่องที่มีคำนั้นจะเรืองแสงสักครู่ ให้เห็นตำแหน่ง", "พิมพ์คำไทย ติดกันหรือเว้นวรรค ก็ค้นเจอเหมือนกัน การค้นหาอ่านสมุดอย่างเดียว ไม่แก้ไขอะไรในสมุด"]}, {"id": 1, "date": "2026-11-13", "items": ["ดูเวอร์ชันของแอปได้ที่เมนู แท็บตั้งค่า หัวข้อเกี่ยวกับแอป", "เมื่อมีเวอร์ชันใหม่ระหว่างใช้งาน แอปจะไม่รีโหลดเอง รวมถึงจอผู้ชม เวอร์ชันใหม่จะมีผล เมื่อเปิดแอปครั้งถัดไป หรือเมื่อแตะแถบ มีเวอร์ชันใหม่", "หน้าที่เปิดค้างไว้ ใช้ส่วนต่าง ๆ ของแอป จากเวอร์ชันเดียวกับตัวเองเสมอ ไม่ปนกับเวอร์ชันใหม่", "เมื่อแอปทำงานผิดพลาด แอปจะส่งรายงาน ให้ผู้พัฒนา โดยส่งเฉพาะ ข้อความแจ้งข้อผิดพลาด ตำแหน่งในโค้ด รุ่นเครื่อง และเวอร์ชันของแอป ไม่ส่งเนื้อหาสมุด ชื่อ หรืออีเมล"]}];
 const TH_MON = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
 function thDay(iso) { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso || ''); return m ? (+m[3]) + ' ' + TH_MON[+m[2] - 1] + ' ' + (+m[1] + 543) : ''; }
 function renderVersion() { const el = $('#verNote'); if (el) el.innerHTML = 'เวอร์ชัน <span class="nowrap">' + esc(VERSION.startsWith('__') ? 'ในเครื่อง (ยังไม่ได้ประกอบ)' : VERSION) + '</span>'; }
