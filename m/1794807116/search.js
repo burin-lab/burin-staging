@@ -5,7 +5,7 @@
    both compared without spaces; a page is a hit when it has every word looked for. The pages are read a few at a time
    between frames, so a shelf of many notebooks does not freeze an iPad, and the words of a page are remembered until
    that page changes (a page that changes is a new object in the store) ---------- */
-const FIND = { gen: 0, memo: new WeakMap(), seg: null, max: 120, budget: 8 };
+const FIND = { gen: 0, memo: new WeakMap(), seg: null, max: 120, budget: 8 }; /* max is written in the message shown when there are more */
 /* the same letters written two ways compare the same: sara am typed as two marks (the tone mark before or after the circle), zero-width spaces, wide forms */
 function findNorm(s) {
   let t = String(s || '');
@@ -151,17 +151,21 @@ function findShow(q, box) {
   const groups = new Map();
   findRun(q, (S.nbs || []).slice(), (r) => {
     let g = groups.get(r.nb.id);
-    if (!g) { g = document.createElement('div'); g.className = 'findnb'; const t = document.createElement('b'); t.textContent = r.nb.title || 'สมุด'; g.appendChild(t); list.appendChild(g); groups.set(r.nb.id, g); }
+    /* what people wrote (notebook names, headings, excerpts) carries the class nbname, so the app's own translation of
+       its labels into another language never changes it; only the labels around it are translated */
+    if (!g) { g = document.createElement('div'); g.className = 'findnb'; const t = document.createElement('b'); t.className = 'nbname'; t.textContent = r.nb.title || 'สมุด'; g.appendChild(t); list.appendChild(g); groups.set(r.nb.id, g); }
     const b = document.createElement('button'); b.type = 'button'; b.className = 'findhit'; b.setAttribute('role', 'listitem');
     b.dataset.nb = r.nb.id; b.dataset.pid = r.pid; b.dataset.item = r.item;
-    b.innerHTML = '<span class="findpg"></span><span class="findtx">' + r.html + '</span>';
-    b.querySelector('.findpg').textContent = 'หน้า ' + r.n + (r.head ? ' ' + r.head : '');
-    b.setAttribute('aria-label', 'เปิด ' + (r.nb.title || 'สมุด') + ' หน้า ' + r.n);
+    b.innerHTML = '<span class="findpg"><span></span><span class="nbname"></span></span><span class="findtx nbname">' + r.html + '</span>';
+    b.querySelector('.findpg > span').textContent = 'หน้า ' + r.n;
+    if (r.head) b.querySelector('.findpg > .nbname').textContent = ' ' + r.head;
     b.onclick = () => findGo(r.nb.id, r.pid, r.item);
     g.appendChild(b);
   }, (d) => {
     if (!box.isConnected) return;
-    st.textContent = d.hits ? 'พบ ' + d.hits + ' หน้า' + (d.more ? ' แสดงเฉพาะ ' + FIND.max + ' หน้าแรก พิมพ์คำให้ยาวขึ้นเพื่อให้ตรงกว่านี้' : '') : 'ไม่พบข้อความนี้ในหน้าสมุด ลายมือที่ยังไม่ได้แปลงเป็นตัวพิมพ์ค้นไม่ได้';
+    /* each sentence whole (the list of labels for other languages has them word for word) */
+    st.textContent = d.hits ? 'พบ ' + d.hits + ' หน้า' : 'ไม่พบข้อความนี้ในหน้าสมุด ลายมือที่ยังไม่ได้แปลงเป็นตัวพิมพ์ค้นไม่ได้';
+    if (d.more) { const m2 = document.createElement('span'); m2.className = 'findmore'; m2.textContent = 'แสดงเฉพาะ 120 หน้าแรก พิมพ์คำให้ยาวขึ้นเพื่อให้ตรงกว่านี้'; st.appendChild(document.createTextNode(' ')); st.appendChild(m2); }
   }, () => box.isConnected);
 }
 /* go to the page and point at the box: the page moves so the box is in view, and the box glows for a moment */
@@ -177,7 +181,9 @@ function findGo(nid, pid, itemId) {
     const it = ((S.page && S.page.items) || []).find((x) => x && x.id === itemId);
     const el = document.querySelector(sel);
     if (!it || !el) { if (++tries < 30) setTimeout(look, 100); return; }
-    if (!FLOW.on && vp) {
+    /* moved the same way in both ways of turning pages: in continuous scrolling the page shown is placed by S.ty too
+       (the page is not scrolled natively, so scrollIntoView would leave a box low on the page out of view) */
+    if (vp) {
       const k = S.base * S.zoom, top = S.ty + (it.y || 0) * k, vh = vp.clientHeight;
       if (top < 60 || top > vh * 0.7) { S.ty = vh * 0.3 - (it.y || 0) * k; S.pull = 0; clampT(); applyT(); }
     } else if (el.scrollIntoView) el.scrollIntoView({ block: 'center' });
