@@ -37,8 +37,12 @@ function cleanLoad() {
 function cleanCss() {
   if (document.getElementById('cleanCss')) return;
   const st = document.createElement('style'); st.id = 'cleanCss';
-  const off = ['.dock', '.pagenav', '#bExitFull', '.addpage', '#nbScroll', '#livePill', '#exMini', '#updBar', '#toast', '.selbar', '.convbar', '.peekcard', '#pull', '#aiFloat', '.aiat', '.busy', '#tabMenu'];
+  /* the app's bars and messages, and on the page what the audience screen hides too: the teacher's answer boxes (เฉลย),
+     the answer buttons of questions, the handles of boxes, the controls of moving models, the selection frame */
+  const off = ['.dock', '.pagenav', '#bExitFull', '.addpage', '#nbScroll', '#livePill', '#exMini', '#updBar', '#toast', '.selbar', '.convbar', '.peekcard', '#pull', '#aiFloat', '.aiat', '.busy', '#tabMenu', '#ai', '.sheet',
+    '.item.teacher', '.item .qkey', '.item .tgrab', '.item .tsize', '.lifedot', '.lifepanel', '.cleandot', '.lockban', '.diarybar', '#sel', '.peek', '.fpeek'];
   st.textContent = off.map((s) => 'body.clean ' + s).join(', ') + ' { display: none !important; }\n'
+    + 'body.clean .item.qon { outline: none !important; }\n'
     + '#cleanCover { position: absolute; left: 0; right: 0; bottom: 0; z-index: 4; background: #3A3F4A; background-image: repeating-linear-gradient(135deg, rgba(255,255,255,0.04) 0 12px, rgba(255,255,255,0) 12px 24px); box-shadow: 0 -2px 10px rgba(0,0,0,0.35); touch-action: none; }\n'
     + '#cleanBlank { position: absolute; inset: 0; z-index: 50; background: #000; touch-action: none; }\n'
     + '#cleanSet { position: fixed; inset: 0; z-index: 70; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.45); }\n'
@@ -70,7 +74,7 @@ function cleanSetup() {
     + '<p class="csub">เมื่อเริ่มแล้ว จอจะเห็นแต่หน้ากระดาษ ไม่มีแถบหรือปุ่มใด ทั้งบน iPad และทีวี เลือกปากกาไว้ที่นี่ก่อน แล้วระหว่างนำเสนอใช้นิ้วแตะขอบจอเพื่อหยิบปากกาของขอบนั้น</p>'
     + '<div id="csEdges"></div>'
     + '<div class="crow"><b>ขนาดเส้น</b><span class="cch" id="csW"></span></div>'
-    + '<div class="copt"><span>ทั้งหน้า<small>หน้ากระดาษพอดีจอ เปลี่ยนหน้าทีละหน้า</small></span><button type="button" class="tg" role="switch" id="csWhole"><i></i></button></div>'
+    + '<div class="copt"><span>ทั้งหน้า<small>หน้ากระดาษพอดีจอ ไม่ต้องเลื่อนดู</small></span><button type="button" class="tg" role="switch" id="csWhole"><i></i></button></div>'
     + '<div class="copt"><span>ม่านบังครึ่งล่าง<small>ใช้นิ้วลากม่านลงเพื่อเปิดทีละบรรทัด ลากจนสุดม่านหายไป</small></span><button type="button" class="tg" role="switch" id="csCover"><i></i></button></div>'
     + '<ul><li>นิ้วเลื่อนหน้า ดึงเพื่อไปหน้าถัดไป</li><li>แตะสองนิ้ว ย้อนกลับ แตะสามนิ้ว ทำซ้ำ</li><li>แตะค้างสามนิ้ว 1 วินาที ออกจากจอสะอาด</li><li>รีโมตนำเสนอ ปุ่มเปลี่ยนหน้า เปลี่ยนหน้า ปุ่ม B พักจอ ปุ่ม Esc ออก</li></ul>'
     + '<div class="cgo"><button type="button" class="no">ยกเลิก</button><button type="button" class="go">เริ่มนำเสนอ</button></div></div>';
@@ -220,7 +224,8 @@ function cleanStart(set) {
   S.width = set.w;
   cleanPen('l');
   CLEAN.flow = FLOW.on;
-  if (set.whole && FLOW.on) { FLOW.on = false; try { renderPeeks().catch(() => {}); } catch (e) { /* fine */ } }
+  /* one page at a time: the pages above and below are pictures made for the teacher's screen (answer boxes included) */
+  if (FLOW.on) { FLOW.on = false; try { renderPeeks().catch(() => {}); } catch (e) { /* fine */ } }
   closePops(); if (S.sel) clearSel();
   document.body.classList.add('clean');
   window.addEventListener('pointerdown', cleanDown, true);
