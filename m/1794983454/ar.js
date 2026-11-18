@@ -277,6 +277,9 @@ function arSheet() {
   sh = document.createElement('div'); sh.className = 'sheet'; sh.id = 'arSheet'; sh.hidden = true;
   sh.innerHTML = '<div class="panel wide" role="dialog" aria-label="ลองดูในห้องจริง"><div class="histtop"><h2>ลองดูในห้องจริง</h2><button class="btn" id="bArClose" type="button">ปิด</button></div>'
     + '<div class="note" id="arEnv"></div><div class="note">' + arPh('เลือกวัตถุ แล้วลองเปิดทีละทาง เปิดแล้วกลับมาที่หน้านี้ แตะว่าเห็นวัตถุในห้องหรือไม่ แล้วกด คัดลอกผล ส่งให้ผู้พัฒนา') + '</div>'
+    /* iPad Air 3 has no depth sensor: it finds the table from the camera picture alone, so a plain, shiny or dark
+       table can leave only the system's see-through square that asks for the device to move */
+    + '<div class="note" id="arTip">' + arPh('ถ้าเห็นแต่กรอบสี่เหลี่ยมโปร่ง แปลว่าเครื่องกำลังหาพื้นโต๊ะ ส่องไปที่โต๊ะที่มีลวดลาย หรือวางหนังสือที่เปิดไว้บนโต๊ะ ห่างราว 50\u00a0เซนติเมตร ในที่ที่สว่างพอ แล้วเลื่อนเครื่องช้า ๆ ไปทางซ้ายและขวา ถ้ายังไม่ขึ้น แตะ วัตถุ (Object) ด้านบนของจอ เพื่อหมุนดูโดยไม่ใช้กล้อง') + '</div>'
     + '<div class="archips" id="arPick"></div><div id="arOut"></div><h3>ผลที่ลองแล้ว</h3><div class="arlog" id="arLog"></div>'
     + '<textarea id="arText" readonly aria-label="ผลทั้งหมด"></textarea><div class="row2"><button class="btn solid" id="bArCopy" type="button">คัดลอกผล</button></div></div>';
   document.body.appendChild(sh);
@@ -342,7 +345,7 @@ function arLogShow() {
   AR.log.slice(0, 20).forEach((t) => {
     const r = document.createElement('div'); r.className = 'arrow'; const S0 = AR_SAMPLES.find((s) => s.id === t.id);
     const sp = document.createElement('span'); sp.innerHTML = arPh(S0.name + ' ทาง' + AR_WAYS[t.way] + (t.hid != null ? ' หน้านี้ถูกบังหลังแตะ ' + (t.hid / 1000).toFixed(1) + '\u00a0วินาที' : '')); r.appendChild(sp);
-    [['yes', 'เห็นวัตถุในห้อง'], ['no', 'ไม่ขึ้น']].forEach(([v, l]) => { const c = document.createElement('button'); c.type = 'button'; c.className = 'chip'; c.textContent = l; c.setAttribute('aria-pressed', t.seen === v ? 'true' : 'false'); c.onclick = () => { t.seen = v; arLogShow(); }; r.appendChild(c); });
+    [['yes', 'เห็นวัตถุในห้อง'], ['frame', 'ขึ้นแต่กรอบโปร่ง'], ['no', 'ไม่ขึ้น']].forEach(([v, l]) => { const c = document.createElement('button'); c.type = 'button'; c.className = 'chip'; c.textContent = l; c.setAttribute('aria-pressed', t.seen === v ? 'true' : 'false'); c.onclick = () => { t.seen = v; arLogShow(); }; r.appendChild(c); });
     box.appendChild(r);
   });
   arText();
@@ -350,7 +353,7 @@ function arLogShow() {
 function arReport() {
   const E = AR.env || arEnv(), o = ['BURIN ลอง AR รุ่น ' + (typeof VERSION !== 'undefined' ? VERSION : ''), arEnvText(E), E.ua];
   for (const s of AR_SAMPLES) { const b = AR.built[s.id]; if (b) o.push(s.name + ': usdz ' + arKb(b.usdz.length) + ', glb ' + arKb(b.glb.length) + ', สามเหลี่ยม ' + b.tris + ', เวลา ' + b.ms.model + '+' + b.ms.usdz + '+' + b.ms.glb + ' ms, ' + 'ถือ ' + arKb(b.held) + (b.heap > 0 ? ', หน่วยความจำ ' + arKb(b.heap) : '')); }
-  AR.log.slice().reverse().forEach((t) => o.push(new Date(t.at).toLocaleTimeString() + ' ' + t.id + ' ' + t.way + (t.hid != null ? ' บัง ' + t.hid + ' ms' : '') + ' ผล ' + (t.seen === 'yes' ? 'เห็น' : t.seen === 'no' ? 'ไม่ขึ้น' : 'ยังไม่บอก')));
+  AR.log.slice().reverse().forEach((t) => o.push(new Date(t.at).toLocaleTimeString() + ' ' + t.id + ' ' + t.way + (t.hid != null ? ' บัง ' + t.hid + ' ms' : '') + ' ผล ' + (t.seen === 'yes' ? 'เห็น' : t.seen === 'frame' ? 'กรอบโปร่ง' : t.seen === 'no' ? 'ไม่ขึ้น' : 'ยังไม่บอก')));
   return o.join('\n');
 }
 function arText() { const t = $('#arText'); if (t) t.value = arReport(); }
