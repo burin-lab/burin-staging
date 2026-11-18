@@ -873,6 +873,10 @@ body.tv .convbar { bottom: 112px; }
 #calc code { font-size: 12px; background: var(--surface-2); padding: 1px 5px; border-radius: 6px; }
 .updbar { position: absolute; left: 50%; top: 12px; transform: translateX(-50%); z-index: 9; min-height: 40px; padding: 0 16px; border-radius: 999px; border: 0; background: var(--accent); color: #FFFFFF; font-size: 14px; font-weight: 600; box-shadow: var(--shadow); cursor: pointer; }
 body.present .updbar { display: none !important; }
+.labar { position: absolute; left: 50%; bottom: 72px; transform: translateX(-50%); z-index: 9; display: flex; align-items: center; flex-wrap: wrap; justify-content: center; gap: 8px; width: max-content; max-width: calc(100% - 24px); box-sizing: border-box; padding: 8px 10px 8px 16px; border-radius: 18px; background: var(--surface); color: var(--fg); border: 1px solid var(--line); box-shadow: var(--shadow); font-size: 14px; line-height: 1.5; }
+.labar span { flex: 1 1 220px; min-width: 0; }
+.labar .btn { min-height: 44px; white-space: nowrap; }
+body.present .labar, body.showscr .labar { display: none !important; }
 /* keeping the notebooks of this device (task 2.2): a note at the top of the notebook list, and the section in Settings */
 .keepcard { margin: 0 0 12px; padding: 12px 14px; border-radius: 14px; background: var(--accent-soft); color: var(--fg); font-size: 14px; line-height: 1.45; }
 .keepcard .kt { display: flex; flex-direction: column; gap: 4px; }
@@ -2257,6 +2261,7 @@ body.role-student .scnpill .sbtns button[data-s="back"], body.role-student .scnp
       </div>
 
       <button class="updbar no-ink" id="updBar" hidden>มีเวอร์ชันใหม่ แตะเพื่ออัปเดต</button>
+      <div class="labar no-ink" id="laBar" role="status" hidden><span id="laMsg"></span><button class="btn solid" id="laGo" type="button"></button><button class="btn" id="laX" type="button">ปิดข้อความ</button></div>
       <button class="pexit no-ink" id="presentExit" hidden>ออกจากจอผู้ชม</button>
       <div class="pwait no-ink" id="presentWait" hidden><b>หน้าต่างนี้เป็นจอผู้ชมแล้ว</b><br>เปิดสมุดแล้วเขียนบนอีกเครื่องที่ใช้บัญชีเดียวกัน หน้านั้นจะขึ้นที่นี่<br><small>ถ้าใช้เครื่องนี้เครื่องเดียวต่อจอใหญ่ ให้ใช้แบบเต็มจอแทน จะเขียนต่อได้</small><span class="row2"><button type="button" class="btn" id="pwFull">ขยายเต็มจอ</button><button type="button" class="btn" id="pwFocus">ใช้แบบเต็มจอ เขียนต่อได้</button><button type="button" class="btn solid" id="pwExit">ออกจากจอผู้ชม</button></span></div>
       <button class="exitfull no-ink" id="bExitFull" hidden aria-label="ออกจากเต็มหน้าจอ"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M7.5 3v4.5H3 M17 7.5h-4.5V3 M12.5 17v-4.5H17 M3 12.5h4.5V17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg><span>แตะอีกครั้งเพื่อออกจากเต็มจอ</span></button>
@@ -18251,6 +18256,7 @@ const LIVE_CONTENT = new Set(['page', 'strokes', 'ink', 'laser', 'sadd', 'sdel',
 const liveOffNb = () => LIVE.role === 'teacher' && !!LIVE.nbId && S.nid !== LIVE.nbId;
 function liveSend(ev, data) {
   if (!LIVE.ch || !LIVE.ready) return;
+  if (ev !== 'end' && LIVE.role === 'teacher' && laAway()) return;
   if (LIVE_CONTENT.has(ev) && liveOffNb()) return;
   const ch = LIVE.ch, teacher = LIVE.role === 'teacher';
   const mine = !teacher && (ev === 'ans' || ev === 'join') ? RK.mine : null, key = teacher ? (RK.code === LIVE.code ? RK.priv : null) : mine && mine.priv;
@@ -18343,6 +18349,7 @@ async function liveOpen() {
   LIVE.ch = ch; liveRender(); $('#bLive').classList.add('on');
   /* the room stays open after the app reloads or updates, until the teacher closes it */
   store_ls.set('tp-live-on', '1'); store_ls.set('tp-live-cls', LIVE.clsId || '');
+  laOpened();
 }
 /* homework given from this notebook is listed for the students in its room */
 async function liveSendHw(reload) {
@@ -18358,12 +18365,97 @@ async function liveSendRoster(p) {
   if (!LIVE.rosterMsg || LIVE.rosterMsg.at !== c.at) LIVE.rosterMsg = Object.assign(await rosterHashed(c), { at: c.at });
   liveSend('roster', LIVE.rosterMsg);
 }
-function liveClose() {
-  if (LIVE.ch) { liveSend('end', {}); try { CLOUD.client.removeChannel(LIVE.ch); } catch (e) { /* closed */ } }
+function liveClose(o) {
+  if (LIVE.ch) { if (!(o && o.quiet)) liveSend('end', {}); try { CLOUD.client.removeChannel(LIVE.ch); } catch (e) { /* closed */ } }
   clearInterval(V2.digT); V2.sent.clear(); V2.full = null;
   store_ls.del('tp-live-on'); store_ls.del('tp-live-cls'); store_ls.del('tp-live-nb'); LIVE.seen = null; LIVE.nbId = null; LIVE.hw = null;
   LIVE.ch = null; LIVE.ready = false; LIVE.role = null; LIVE.peers = []; LIVE.clsId = null; LIVE.set = null; LIVE.pool = null; LIVE.ans = {}; LIVE.revealed = false;
   $('#bLive').classList.remove('on'); $('#bLiveN').textContent = ''; liveRender();
+}
+/* ----- a live room nobody uses closes itself (switch: liveauto) -----
+   1. back in the app after more than an hour away (the iPad locked, another app, the app closed): the room does not
+      come back by itself and nothing is sent to the learners; a bar offers to open the same room again
+   2. no learner and no room display for 30 minutes while the teacher does nothing at all: the room closes, with a bar
+      one minute before that keeps it open. A teacher who is teaching keeps the room even when every learner's iPad locks
+   3. closing by itself loses nothing: the data and the practice set gathered from the learners stay in the panel, and
+      the learners are not told the room closed while another device of the teacher is still in it
+   4. homework does not depend on the room: hand-ins go on until the time the teacher set */
+const LA = { act: 0, busy: 0, opened: 0, seen: 0, warned: false, last: null, T: null, savedAt: 0 };
+const LA_AWAY = 3600000, LA_IDLE = 1800000, LA_WARN = 60000;
+const laOn = () => flagOn('liveauto');
+const laRoom = () => LIVE.role === 'teacher' && !!LIVE.ch;
+function laAway() {
+  if (!laOn() || !laRoom() || !LA.seen) return false;
+  if (now() - LA.seen <= LA_AWAY) return false;
+  laClose('away', LA.seen); return true;
+}
+function laOpened() {
+  /* what was kept from a room that closed by itself belongs to that room only */
+  if (LA.last && (LA.last.nb !== LIVE.nbId || (LA.last.cls || null) !== (LIVE.clsId || null))) { LIVE.set = null; LIVE.ans = {}; LIVE.revealed = false; LIVE.pool = null; }
+  const t = now(); LA.act = LA.busy = LA.opened = LA.seen = t; LA.warned = false; LA.last = null; laBar(null);
+  laSave(true);
+  if (!LA.T) LA.T = setInterval(laTick, 15000);
+}
+function laSave(force) { const t = now(); if (force || t - LA.savedAt > 60000) { LA.savedAt = t; store_ls.set('tp-live-at', String(t)); } }
+/* homework of this room still taking work (no time set, or the time not passed) */
+function laHwOpen() { const t = now(); return (LIVE.hw || []).filter((a) => a && (!a.due || Date.parse(a.due) > t)).length; }
+function laOthers() {
+  try { const st = LIVE.ch.presenceState(); return Object.keys(st).filter((k) => k.indexOf('teacher-') === 0 && k !== 'teacher-' + TAB).length; } catch (e) { return 0; }
+}
+function laTick() {
+  if (!laOn() || !laRoom() || document.hidden) return;
+  if (laAway()) return;
+  const t = now(); LA.seen = t; laSave();
+  if ((LIVE.peers || []).length || LIVE.displays) LA.busy = t;
+  const quiet = t - Math.max(LA.act, LA.busy, LA.opened);
+  if (quiet >= LA_IDLE) { laClose('idle', t - quiet); return; }
+  if (LA.warned && quiet < LA_IDLE - LA_WARN) { LA.warned = false; laBar(null); }
+  if (quiet >= LA_IDLE - LA_WARN && !LA.warned) {
+    LA.warned = true;
+    laBar('ไม่มีผู้เรียนในห้อง ' + LIVE.code + ' ห้องจะปิดเองในอีก 1\u00a0นาที', 'เปิดห้องต่อ', () => { LA.act = now(); LA.warned = false; laBar(null); });
+  }
+}
+function laClose(why, since) {
+  if (!laRoom()) return;
+  const keep = { set: LIVE.set, ans: LIVE.ans, revealed: LIVE.revealed, pool: LIVE.pool }, hw = laHwOpen();
+  const last = { code: LIVE.code, cls: LIVE.clsId, nb: LIVE.nbId, at: since || now(), why };
+  liveClose({ quiet: laOthers() > 0 });
+  Object.assign(LIVE, keep); LIVE.code = last.code; LA.last = last; clearInterval(LA.T); LA.T = null;
+  laClosedBar(last, hw);
+  liveRender();
+}
+function laClosedBar(last, hw) {
+  const hm = new Date(last.at).toLocaleTimeString(LOC, { hour: '2-digit', minute: '2-digit' });
+  laBar('ห้อง\u00a0' + last.code + ' ปิดแล้ว เพราะไม่ได้ใช้ตั้งแต่ ' + hm + '\u00a0น.' + (hw ? ' การบ้าน ' + hw + '\u00a0งานยังรับงานตามกำหนด' : ''), 'เปิดห้องเดิมอีกครั้ง', laReopen);
+}
+function laReopen() {
+  const l = LA.last; laBar(null); if (!l) return;
+  LIVE.clsId = l.cls || null; LIVE.nbId = l.nb || null; LIVE.code = l.code;
+  liveOpen().then(() => toast('เปิดห้อง\u00a0' + LIVE.code + ' อีกครั้งแล้ว ผู้เรียนใช้รหัสเดิมได้', 2600)).catch(() => {});
+}
+function laBar(msg, act, f) {
+  const b = $('#laBar'); if (!b) return;
+  if (!msg) { b.hidden = true; return; }
+  $('#laMsg').textContent = msg; const go = $('#laGo'); go.textContent = act || ''; go.hidden = !act; go.onclick = () => { laBar(null); if (f) f(); };
+  b.hidden = false;
+}
+$('#laX').onclick = () => laBar(null);
+/* what the teacher does with the app (writing, turning pages, any touch or key) */
+for (const ev of ['pointerdown', 'keydown', 'wheel']) document.addEventListener(ev, () => { if (LA.opened) LA.act = now(); }, { capture: true, passive: true });
+document.addEventListener('visibilitychange', () => {
+  if (!laOn() || !laRoom()) return;
+  if (document.hidden) { if (now() - LA.seen <= LA_AWAY) { LA.seen = now(); laSave(true); } return; }
+  if (!laAway()) { LA.seen = now(); LA.act = now(); laSave(true); }
+});
+/* the app opened again: the room comes back only when it was in use within the hour */
+function laBoot() {
+  if (!laOn()) return true;
+  const at = +store_ls.get('tp-live-at') || 0;
+  if (!at || now() - at <= LA_AWAY) return true;
+  LA.last = { code: store_ls.get('tp-class'), cls: store_ls.get('tp-live-cls') || null, nb: store_ls.get('tp-live-nb') || null, at, why: 'away' };
+  store_ls.del('tp-live-on');
+  setTimeout(() => laClosedBar(LA.last, 0), 900);
+  return false;
 }
 function liveSig() { return S.pid + '|' + S.mine.map((x) => x.id + ':' + (x.p[0] | 0) + ',' + (x.p[1] | 0)).join(';'); }
 async function liveSendPageNow(full) {
@@ -18428,6 +18520,11 @@ function liveRender() {
     const cf = exEl('label', 'field', '<span>ห้องเรียน (ให้ผู้เรียนยืนยันตัวด้วยรหัสหรือเลขที่ และเก็บคะแนนแบบฝึกเข้าห้องนี้)</span>'); box.appendChild(cf);
     const fillCls = () => cf.appendChild(classSelect('liveCls', true)); if (CLS.loaded) fillCls(); else clsLoad().then(fillCls);
     const b = exEl('button', 'btn solid', 'เปิดห้องเรียนสด'); b.onclick = () => { LIVE.clsId = ($('#liveCls') && $('#liveCls').value) || null; LIVE.code = null; LIVE.nbId = S.nid; liveOpen(); }; box.appendChild(b);
+    if (LA.last && (LIVE.pool || LIVE.set)) {
+      box.appendChild(exEl('h3', '', 'ผลที่เก็บจากผู้เรียนก่อนห้องปิด'));
+      if (LIVE.pool) { const pb = exEl('div', 'poolbox', ''); box.appendChild(pb); if (MODOK.data) poolSection(pb); else need('data').then(() => liveRender()).catch(() => {}); }
+      if (LIVE.set) { const r4 = exEl('div', 'row2'); box.appendChild(exEl('div', 'note small', esc(LIVE.set.title) + ' ส่งคำตอบแล้ว ' + Object.keys(LIVE.ans || {}).length + ' คน คำตอบบันทึกไว้ในผลแบบฝึกแล้ว')); const an = exEl('button', 'btn', 'วิเคราะห์ข้อสอบชุดนี้'); an.onclick = () => { EX.anSet = LIVE.set.id; EX.tab = 'analysis'; EX.run = null; openExam(); }; r4.appendChild(an); box.appendChild(r4); }
+    }
     if (S.nb && S.nb.rooms && S.nb.rooms['-']) box.appendChild(exEl('div', 'note small', 'สมุดนี้ใช้รหัสห้อง <b>' + esc(S.nb.rooms['-']) + '</b> ประจำ ผู้เรียนใช้รหัสเดิมเข้าได้ทุกครั้ง' + (Object.keys(S.nb.rooms).length > 1 ? ' (ถ้าเลือกห้องเรียน แต่ละห้องมีรหัสของตัวเอง)' : '')));
   } else {
     const link = classLink(LIVE.code);
@@ -18438,7 +18535,7 @@ function liveRender() {
     const big = exEl('button', 'btn', 'วาง QR ลงหน้ากระดาษให้ทั้งห้องเห็น'); big.onclick = liveQRToPage; row.appendChild(big);
     const rs = exEl('button', 'btn', 'ส่งหน้านี้อีกครั้ง'); rs.onclick = () => liveSendPageNow(true); row.appendChild(rs);
     const nc = exEl('button', 'btn', 'เปลี่ยนรหัสห้อง'); nc.title = 'ใช้รหัสใหม่สำหรับ' + liveWhose() + ' ผู้เรียนที่ใช้รหัสเดิมจะเข้าไม่ได้'; nc.onclick = () => { const cls = LIVE.clsId, nid = LIVE.nbId; liveClose(); LIVE.clsId = cls; LIVE.nbId = nid; LIVE.code = liveRoomCode(nid, cls, true); liveOpen(); toast('เปลี่ยนรหัสห้องแล้ว', 1800); }; row.appendChild(nc);
-    const cl = exEl('button', 'btn', 'ปิดห้อง'); cl.onclick = () => { liveClose(); store_ls.set('tp-class', ''); LIVE.code = null; }; row.appendChild(cl);
+    const cl = exEl('button', 'btn', 'ปิดห้อง'); cl.onclick = () => { const hw = laHwOpen(); liveClose(); store_ls.set('tp-class', ''); LIVE.code = null; if (hw && flagOn('liveauto')) toast('ปิดห้องแล้ว การบ้าน ' + hw + '\u00a0งานยังรับงานตามกำหนด', 3600); }; row.appendChild(cl);
     box.appendChild(row);
     const lc = LIVE.clsId && CLS.list.find((x) => x.id === LIVE.clsId);
     box.appendChild(exEl('h3', '', 'ผู้เรียนในห้อง ' + n + ' คน' + (lc ? ' จาก ' + (lc.roster || []).length + ' คน ' + esc(classLabel(lc)) : '')));
@@ -18666,7 +18763,12 @@ async function studentJoin(code) {
   rkOnTeacher(ch, 'roster', (m) => studentRoster(m.payload));
   rkOnTeacher(ch, 'rename', (m) => { const d = m.payload; if (!d || d.sid !== LIVE.sid || typeof d.name !== 'string' || LIVE.stu) return; LIVE.name = d.name.slice(0, 60); store_ls.set('tp-sname', LIVE.name); try { ch.track({ role: 'student', name: LIVE.name, v: 2 }); } catch (e) { /* offline */ } toast('ผู้สอนตั้งชื่อของคุณในห้องนี้เป็น ' + LIVE.name, 3000); });
   rkOnTeacher(ch, 'hw', (m) => { const L = (m.payload && Array.isArray(m.payload.list)) ? m.payload.list.filter((a) => a && typeof a.id === 'string' && /^[a-z0-9]{6,20}$/.test(a.id)).slice(0, 12) : []; for (const a of L) if (typeof a.cls !== 'string' || !/^c[a-z0-9]{3,30}$/i.test(a.cls)) a.cls = null; LIVE.hwList = L; const b = $('#lpHw'); b.hidden = !L.length; b.textContent = 'การบ้าน ' + L.length; hwKeep(L); });
-  rkOnTeacher(ch, 'end', () => { liveStudentPill('ผู้สอนปิดห้องแล้ว สมุดยังอยู่ในเครื่องนี้'); });
+  rkOnTeacher(ch, 'end', () => {
+    /* homework does not close with the room: tell how much can still be handed in, and where */
+    let n = 0; if (flagOn('liveauto')) { try { const sent = JSON.parse(store_ls.get('tp-sent') || '[]'), t = now(); n = (LIVE.hwList || []).filter((a) => !sent.includes(a.id) && (!a.due || Date.parse(a.due) > t)).length; } catch (e) { n = 0; } }
+    liveStudentPill(n ? 'ผู้สอนปิดห้องแล้ว การบ้าน ' + n + '\u00a0งานยังส่งได้ถึงเวลาที่กำหนด' : 'ผู้สอนปิดห้องแล้ว สมุดยังอยู่ในเครื่องนี้');
+    if (n) laBar('ผู้สอนปิดห้องแล้ว การบ้าน ' + n + '\u00a0งานยังส่งได้ถึงเวลาที่กำหนด', 'ไปที่งานของฉัน', () => { location.hash = 'mywork'; openMyWork(); });
+  });
   /* is the teacher in the room? if not yet, wait and join by itself the moment the teacher opens it */
   LIVE.gotPage = false;
   const teacherHere = () => { try { const st = ch.presenceState(); return Object.keys(st).some((k) => k.startsWith('teacher-') || (st[k] || []).some((m) => m.role === 'teacher')); } catch (e) { return false; } };
@@ -21757,7 +21859,7 @@ async function deckExportPptx() {
 }
 
 /* ---------- new version notice (own website only) ---------- */
-const BUILD = '1794967316';
+const BUILD = '1794971599';
 let updShown = false;
 async function checkUpdate() {
   if (BUILD.startsWith('__') || (window.claude && window.claude.use) || updShown || !navigator.onLine) return;
@@ -21783,8 +21885,8 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) chec
 setInterval(checkUpdate, 30 * 60 * 1000); setTimeout(checkUpdate, 8000);
 
 /* ---------- version and what is new ---------- */
-const VERSION = '20261118-70b66d8e';
-const NEWS = [{"id": 14, "date": "2026-11-18", "items": ["ลืมรหัสผ่าน ตั้งรหัสใหม่ได้จากหน้าเข้าสู่ระบบ กด ลืมรหัสผ่าน แล้วทำตามอีเมลที่ได้รับ", "สมัครบัญชีใหม่แล้วยืนยันอีเมลได้ในแอป และกดส่งอีเมลยืนยันอีกครั้งได้"]}, {"id": 13, "date": "2026-11-17", "items": ["ข้อความที่พิมพ์ไม่ต้องรอ AI สมการที่พิมพ์ เช่น y = 2x + 1 สร้างกราฟได้ทันที ตารางที่พิมพ์เป็นข้อมูลได้ทันที และตรวจหน่วยของบรรทัดคำนวณที่พิมพ์ได้ทันที ใช้ได้แม้ไม่มีอินเทอร์เน็ต", "วาดใหม่ จัดเส้นตรง สี่เหลี่ยม วงกลม ในภาพร่างให้เรียบร้อยทันทีโดยไม่ใช้ AI ตัวอักษรยังเป็นลายมือเดิม ถ้าต้องการให้แก้ตามเนื้อหา กด ให้ AI วาดใหม่ตามเนื้อหา", "หลังทำแบบฝึก บทที่ยังอ่อนบอกชนิดข้อที่พลาด และความเข้าใจที่ควรแก้จากตัวเลือกที่ตอบ"]}, {"id": 12, "date": "2026-11-17", "items": ["ลายมือที่ AI อ่านแล้วไม่ต้องอ่านซ้ำ แปลงเป็นตัวพิมพ์ แก้สมการ สร้างรูป ตรวจหน่วย และสร้างโจทย์ จากลายมือเดิมใช้คำที่อ่านไว้ เร็วขึ้นและไม่ส่งภาพซ้ำ ถ้าอ่านผิด สั่งงานเดิมอีกครั้ง AI จะอ่านใหม่", "ค้นหาในทุกสมุดพบลายมือที่ AI เคยอ่านแล้วด้วย"]}, {"id": 11, "date": "2026-11-17", "items": ["ทดลองวางวัตถุสามมิติบนโต๊ะจริง (AR) ได้ที่ ปุ่ม สมุดทั้งหมด แท็บ ภาษา การเขียน และจอ หัวข้อ ลองดูในห้องจริง ใช้ได้บน iPad และ iPhone แอปสร้างไฟล์ในเครื่องเอง ไม่ใช้ AI"]}, {"id": 10, "date": "2026-11-17", "items": ["คอมที่ต่อจอที่สอง เลือก จอที่สอง ผู้ชมไม่เห็นแถบ ในเมนู นำเสนอ ครูใช้ได้ทุกคำสั่ง จอใหญ่เห็นแต่หน้ากระดาษ ไม่ต้องใช้อินเทอร์เน็ต", "ระหว่างเปิดจอผู้ชม ครูมีแถบเล็ก จอผู้ชม เลือกให้จอใหญ่เห็นทั้งหน้า พักจอ หรือปิด (ปุ่ม B บนคีย์บอร์ดหรือรีโมตก็พักจอได้)", "ต่อ iPad ออกทีวีด้วยสาย ใช้ ต่อสาย จอสะอาด ในเมนู นำเสนอ (ปุ่ม สอนและนำเสนอ)", "เริ่มแล้วจอเห็นแต่หน้ากระดาษ ไม่มีแถบหรือปุ่มใดขึ้นเลย ทั้งบน iPad และทีวี", "ก่อนเริ่ม เลือกปากกาให้แต่ละขอบจอ (สี ไฮไลต์ ยางลบ หรือเลเซอร์) ระหว่างนำเสนอ แตะขอบจอด้วยนิ้วเพื่อหยิบปากกาของขอบนั้น", "เลือกได้ว่าให้เห็นทั้งหน้า และเริ่มด้วยม่านบังครึ่งล่างที่ใช้นิ้วลากลงเพื่อเปิดทีละบรรทัด", "แตะค้างสามนิ้ว 1 วินาที เพื่อออก ใช้รีโมตนำเสนอเปลี่ยนหน้า ปุ่ม B พักจอ ปุ่ม Esc ออก", "เมนู นำเสนอ เหลือสามข้อ จอแสดงผลแบบนักเรียนบนอีกเครื่องและบนจอที่สองรวมเป็นข้อเดียว"]}, {"id": 9, "date": "2026-11-17", "items": ["แถบบนเหลือปุ่มน้อยลง ปุ่มที่ใช้นาน ๆ ครั้ง รวมอยู่ในสองกลุ่ม", "ปุ่ม ต่อยอดจากหน้า มี แปลงเป็นตัวพิมพ์ สร้างโจทย์ และ ชุดโจทย์", "ปุ่ม สอนและนำเสนอ มี ห้องสด นำเสนอ และ ห้องเรียนและโจทย์ (ฝั่งนักเรียนชื่อ ห้องเรียน มี สแกน QR และ เข้าห้องเรียน ด้วย)", "เลือกด้วยบ่วงแล้ว แถบเหนือส่วนที่เลือก แสดงคำสั่งที่ใช้บ่อยก่อน คำสั่งอื่นอยู่ที่ปุ่ม เพิ่มเติม", "หาคำสั่งไม่เจอ พิมพ์ชื่อในช่องค้นหาที่เมนู เช่น PDF หรือ สามมิติ แล้วแตะคำสั่งที่ขึ้นมา"]}, {"id": 8, "date": "2026-11-16", "items": ["สร้างโจทย์ด้วย AI จากกี่หน้าก็ได้ ทั้งเล่ม ตามบท หรือเป็นช่วงหน้า", "อยู่ที่ปุ่ม สร้างโจทย์ด้วย AI หัวข้อ หน้าที่ใช้สร้างโจทย์ แตะ ทั้งเล่ม หรือแตะชื่อบท หรือใส่ช่วงหน้า แล้วกด เลือกช่วงนี้", "หน้าที่ AI อ่านแล้ว เก็บไว้ในเครื่องนี้ ครั้งต่อไป ไม่ต้องอ่านซ้ำ จึงเร็วขึ้น และประหยัดค่า AI"]}, {"id": 7, "date": "2026-11-16", "items": ["ลบผิด หรือเขียนทับผิด ดึงหน้า เมื่อไม่กี่นาทีก่อน หรือเมื่อวาน กลับมาได้", "อยู่ที่ ลิ้นชักหน้า แตะแถบ หน้านี้ ด้านล่าง แล้วกดปุ่ม รุ่นก่อนของหน้านี้ เลือกรุ่น ดูภาพหน้าก่อน แล้วกด คืนหน้าเป็นรุ่นนี้", "หน้าก่อนคืน ถูกเก็บไว้ด้วย จึงย้อนกลับได้ แอปเก็บรุ่นก่อน ไว้ในเครื่องนี้ 30 วัน"]}, {"id": 6, "date": "2026-11-16", "items": ["บัญชีคลาวด์ ส่งออกข้อมูลทั้งบัญชี เป็นไฟล์เดียวได้ ทั้งสมุด หน้า หมึก รูป วิดีโอ เลคเชอร์ที่แชร์ การบ้าน และงานที่นักเรียนส่ง", "อยู่ที่ เมนู แท็บตั้งค่า หัวข้อ ข้อมูลทั้งบัญชี กดปุ่ม ส่งออกทั้งบัญชี", "นำเข้าไฟล์นี้ ในบัญชีอื่น หรือเครื่องใหม่ได้ การนำเข้า เพิ่มเฉพาะส่วนที่ยังไม่มี ไม่ทับ และไม่ลบ ของที่มีอยู่"]}, {"id": 5, "date": "2026-11-15", "items": ["ลบสมุด หรือลบหน้าแล้ว ยังกู้คืนได้ ภายใน 30 วัน สิ่งที่ลบ ไปอยู่ในถังขยะ ก่อนถูกลบจริง", "เปิดถังขยะ ได้ที่ เมนู สมุดทั้งหมด ปุ่มถังขยะ ใต้รายการสมุด กดกู้คืน แล้วสมุดกลับไป ที่เดิม หน้ากลับไป ตำแหน่งเดิม ในสมุด", "ลบถาวร ทีละรายการ หรือลบทั้งหมด ในถังขยะได้ ครบ 30 วัน แล้วแอปลบให้เอง"]}, {"id": 4, "date": "2026-11-15", "items": ["สำรองสมุด ทั้งหมดเป็นไฟล์เดียว ได้ที่ เมนู แท็บตั้งค่า หัวข้อ สมุดในเครื่องนี้ ไฟล์เก็บสมุดทุกเล่ม รูป และวิดีโอ ในเครื่องนี้", "นำสมุดคืน จากไฟล์สำรอง ได้ที่เดียวกัน การนำคืน เพิ่มเฉพาะส่วน ที่ยังไม่มีในเครื่อง ไม่ทับ และไม่ลบ ของที่มีอยู่", "แอปขอให้เบราว์เซอร์ เก็บสมุดในเครื่อง ไว้ถาวร และเตือนให้สำรองสมุด ที่หน้ารายการสมุด เมื่อสมุดเปลี่ยนไป ตั้งแต่สำรองครั้งล่าสุด", "บน iPad และ iPhone ใน Safari แอปชวนให้ เพิ่มลงหน้าจอโฮม เพื่อไม่ให้ Safari ลบสมุด ที่ไม่ได้เปิดนาน ให้สำรองสมุดก่อน แล้วนำคืน ในแอปบนหน้าจอโฮม"]}, {"id": 3, "date": "2026-11-14", "items": ["สารบัญ ของสมุด แตะปุ่มหน้าในสมุด ที่มุมซ้ายบน แล้วเลือก สารบัญ จะเห็นหัวเรื่อง ของทุกหน้า แตะหัวเรื่อง เพื่อไปที่หน้านั้น ได้ทันที", "หัวเรื่อง มาจากข้อความที่พิมพ์ไว้ บนสุดของหน้า หรือบรรทัด ที่ขึ้นต้นด้วย ## ลายมือที่ยังไม่ได้แปลง เป็นตัวพิมพ์ ไม่ขึ้นในสารบัญ", "ที่คั่นหน้า แตะ ปักที่คั่นหน้านี้ ในหน้าสารบัญ แล้วตั้งชื่อเองได้ หน้าที่มีที่คั่น จะมีริบบิ้นสีแดง ที่ภาพหน้า", "ที่คั่นหน้า อยู่กับสมุด ของเราเท่านั้น ผู้เรียนในห้องสด ไม่เห็นที่คั่นหน้า ของครู"]}, {"id": 2, "date": "2026-11-14", "items": ["ค้นหาข้อความ ในทุกสมุดได้แล้ว พิมพ์คำในช่องค้นหาที่เมนู แอปจะค้นทั้งชื่อสมุด ข้อความที่พิมพ์ ลายมือที่แปลงเป็นตัวพิมพ์แล้ว หัวเรื่องของหน้า และข้อความในกล่องต่าง ๆ", "แตะผลการค้นหา เพื่อไปที่หน้านั้น กล่องที่มีคำนั้นจะเรืองแสงสักครู่ ให้เห็นตำแหน่ง", "พิมพ์คำไทย ติดกันหรือเว้นวรรค ก็ค้นเจอเหมือนกัน การค้นหาอ่านสมุดอย่างเดียว ไม่แก้ไขอะไรในสมุด"]}, {"id": 1, "date": "2026-11-13", "items": ["ดูเวอร์ชันของแอปได้ที่เมนู แท็บตั้งค่า หัวข้อเกี่ยวกับแอป", "เมื่อมีเวอร์ชันใหม่ระหว่างใช้งาน แอปจะไม่รีโหลดเอง รวมถึงจอผู้ชม เวอร์ชันใหม่จะมีผล เมื่อเปิดแอปครั้งถัดไป หรือเมื่อแตะแถบ มีเวอร์ชันใหม่", "หน้าที่เปิดค้างไว้ ใช้ส่วนต่าง ๆ ของแอป จากเวอร์ชันเดียวกับตัวเองเสมอ ไม่ปนกับเวอร์ชันใหม่", "เมื่อแอปทำงานผิดพลาด แอปจะส่งรายงาน ให้ผู้พัฒนา โดยส่งเฉพาะ ข้อความแจ้งข้อผิดพลาด ตำแหน่งในโค้ด รุ่นเครื่อง และเวอร์ชันของแอป ไม่ส่งเนื้อหาสมุด ชื่อ หรืออีเมล"]}];
+const VERSION = '20261118-7c7c9906';
+const NEWS = [{"id": 15, "date": "2026-11-18", "items": ["ลืมรหัสผ่าน ตั้งรหัสใหม่ได้จากหน้าเข้าสู่ระบบ กด ลืมรหัสผ่าน แล้วทำตามอีเมลที่ได้รับ", "สมัครบัญชีใหม่แล้วยืนยันอีเมลได้ในแอป และกดส่งอีเมลยืนยันอีกครั้งได้"]}, {"id": 14, "date": "2026-11-18", "items": ["ห้องเรียนสดที่ลืมปิดปิดเอง เมื่อกลับมาที่แอปหลังห่างไปเกิน 1 ชั่วโมง ห้องไม่เปิดต่อเองและไม่ส่งสิ่งที่เขียนให้ผู้เรียน แตะ เปิดห้องเดิมอีกครั้ง ได้รหัสเดิม", "ห้องที่ไม่มีผู้เรียนและครูไม่ได้ใช้แอปนาน 30 นาทีปิดเอง มีแถบบอกก่อน 1 นาที ครูที่กำลังสอนห้องไม่ปิด แม้ผู้เรียนล็อกจอ", "ปิดห้องแล้วผู้เรียนยังส่งการบ้านได้ถึงเวลาที่กำหนด และเห็นปุ่มไปที่งานของฉัน"]}, {"id": 13, "date": "2026-11-17", "items": ["ข้อความที่พิมพ์ไม่ต้องรอ AI สมการที่พิมพ์ เช่น y = 2x + 1 สร้างกราฟได้ทันที ตารางที่พิมพ์เป็นข้อมูลได้ทันที และตรวจหน่วยของบรรทัดคำนวณที่พิมพ์ได้ทันที ใช้ได้แม้ไม่มีอินเทอร์เน็ต", "วาดใหม่ จัดเส้นตรง สี่เหลี่ยม วงกลม ในภาพร่างให้เรียบร้อยทันทีโดยไม่ใช้ AI ตัวอักษรยังเป็นลายมือเดิม ถ้าต้องการให้แก้ตามเนื้อหา กด ให้ AI วาดใหม่ตามเนื้อหา", "หลังทำแบบฝึก บทที่ยังอ่อนบอกชนิดข้อที่พลาด และความเข้าใจที่ควรแก้จากตัวเลือกที่ตอบ"]}, {"id": 12, "date": "2026-11-17", "items": ["ลายมือที่ AI อ่านแล้วไม่ต้องอ่านซ้ำ แปลงเป็นตัวพิมพ์ แก้สมการ สร้างรูป ตรวจหน่วย และสร้างโจทย์ จากลายมือเดิมใช้คำที่อ่านไว้ เร็วขึ้นและไม่ส่งภาพซ้ำ ถ้าอ่านผิด สั่งงานเดิมอีกครั้ง AI จะอ่านใหม่", "ค้นหาในทุกสมุดพบลายมือที่ AI เคยอ่านแล้วด้วย"]}, {"id": 11, "date": "2026-11-17", "items": ["ทดลองวางวัตถุสามมิติบนโต๊ะจริง (AR) ได้ที่ ปุ่ม สมุดทั้งหมด แท็บ ภาษา การเขียน และจอ หัวข้อ ลองดูในห้องจริง ใช้ได้บน iPad และ iPhone แอปสร้างไฟล์ในเครื่องเอง ไม่ใช้ AI"]}, {"id": 10, "date": "2026-11-17", "items": ["คอมที่ต่อจอที่สอง เลือก จอที่สอง ผู้ชมไม่เห็นแถบ ในเมนู นำเสนอ ครูใช้ได้ทุกคำสั่ง จอใหญ่เห็นแต่หน้ากระดาษ ไม่ต้องใช้อินเทอร์เน็ต", "ระหว่างเปิดจอผู้ชม ครูมีแถบเล็ก จอผู้ชม เลือกให้จอใหญ่เห็นทั้งหน้า พักจอ หรือปิด (ปุ่ม B บนคีย์บอร์ดหรือรีโมตก็พักจอได้)", "ต่อ iPad ออกทีวีด้วยสาย ใช้ ต่อสาย จอสะอาด ในเมนู นำเสนอ (ปุ่ม สอนและนำเสนอ)", "เริ่มแล้วจอเห็นแต่หน้ากระดาษ ไม่มีแถบหรือปุ่มใดขึ้นเลย ทั้งบน iPad และทีวี", "ก่อนเริ่ม เลือกปากกาให้แต่ละขอบจอ (สี ไฮไลต์ ยางลบ หรือเลเซอร์) ระหว่างนำเสนอ แตะขอบจอด้วยนิ้วเพื่อหยิบปากกาของขอบนั้น", "เลือกได้ว่าให้เห็นทั้งหน้า และเริ่มด้วยม่านบังครึ่งล่างที่ใช้นิ้วลากลงเพื่อเปิดทีละบรรทัด", "แตะค้างสามนิ้ว 1 วินาที เพื่อออก ใช้รีโมตนำเสนอเปลี่ยนหน้า ปุ่ม B พักจอ ปุ่ม Esc ออก", "เมนู นำเสนอ เหลือสามข้อ จอแสดงผลแบบนักเรียนบนอีกเครื่องและบนจอที่สองรวมเป็นข้อเดียว"]}, {"id": 9, "date": "2026-11-17", "items": ["แถบบนเหลือปุ่มน้อยลง ปุ่มที่ใช้นาน ๆ ครั้ง รวมอยู่ในสองกลุ่ม", "ปุ่ม ต่อยอดจากหน้า มี แปลงเป็นตัวพิมพ์ สร้างโจทย์ และ ชุดโจทย์", "ปุ่ม สอนและนำเสนอ มี ห้องสด นำเสนอ และ ห้องเรียนและโจทย์ (ฝั่งนักเรียนชื่อ ห้องเรียน มี สแกน QR และ เข้าห้องเรียน ด้วย)", "เลือกด้วยบ่วงแล้ว แถบเหนือส่วนที่เลือก แสดงคำสั่งที่ใช้บ่อยก่อน คำสั่งอื่นอยู่ที่ปุ่ม เพิ่มเติม", "หาคำสั่งไม่เจอ พิมพ์ชื่อในช่องค้นหาที่เมนู เช่น PDF หรือ สามมิติ แล้วแตะคำสั่งที่ขึ้นมา"]}, {"id": 8, "date": "2026-11-16", "items": ["สร้างโจทย์ด้วย AI จากกี่หน้าก็ได้ ทั้งเล่ม ตามบท หรือเป็นช่วงหน้า", "อยู่ที่ปุ่ม สร้างโจทย์ด้วย AI หัวข้อ หน้าที่ใช้สร้างโจทย์ แตะ ทั้งเล่ม หรือแตะชื่อบท หรือใส่ช่วงหน้า แล้วกด เลือกช่วงนี้", "หน้าที่ AI อ่านแล้ว เก็บไว้ในเครื่องนี้ ครั้งต่อไป ไม่ต้องอ่านซ้ำ จึงเร็วขึ้น และประหยัดค่า AI"]}, {"id": 7, "date": "2026-11-16", "items": ["ลบผิด หรือเขียนทับผิด ดึงหน้า เมื่อไม่กี่นาทีก่อน หรือเมื่อวาน กลับมาได้", "อยู่ที่ ลิ้นชักหน้า แตะแถบ หน้านี้ ด้านล่าง แล้วกดปุ่ม รุ่นก่อนของหน้านี้ เลือกรุ่น ดูภาพหน้าก่อน แล้วกด คืนหน้าเป็นรุ่นนี้", "หน้าก่อนคืน ถูกเก็บไว้ด้วย จึงย้อนกลับได้ แอปเก็บรุ่นก่อน ไว้ในเครื่องนี้ 30 วัน"]}, {"id": 6, "date": "2026-11-16", "items": ["บัญชีคลาวด์ ส่งออกข้อมูลทั้งบัญชี เป็นไฟล์เดียวได้ ทั้งสมุด หน้า หมึก รูป วิดีโอ เลคเชอร์ที่แชร์ การบ้าน และงานที่นักเรียนส่ง", "อยู่ที่ เมนู แท็บตั้งค่า หัวข้อ ข้อมูลทั้งบัญชี กดปุ่ม ส่งออกทั้งบัญชี", "นำเข้าไฟล์นี้ ในบัญชีอื่น หรือเครื่องใหม่ได้ การนำเข้า เพิ่มเฉพาะส่วนที่ยังไม่มี ไม่ทับ และไม่ลบ ของที่มีอยู่"]}, {"id": 5, "date": "2026-11-15", "items": ["ลบสมุด หรือลบหน้าแล้ว ยังกู้คืนได้ ภายใน 30 วัน สิ่งที่ลบ ไปอยู่ในถังขยะ ก่อนถูกลบจริง", "เปิดถังขยะ ได้ที่ เมนู สมุดทั้งหมด ปุ่มถังขยะ ใต้รายการสมุด กดกู้คืน แล้วสมุดกลับไป ที่เดิม หน้ากลับไป ตำแหน่งเดิม ในสมุด", "ลบถาวร ทีละรายการ หรือลบทั้งหมด ในถังขยะได้ ครบ 30 วัน แล้วแอปลบให้เอง"]}, {"id": 4, "date": "2026-11-15", "items": ["สำรองสมุด ทั้งหมดเป็นไฟล์เดียว ได้ที่ เมนู แท็บตั้งค่า หัวข้อ สมุดในเครื่องนี้ ไฟล์เก็บสมุดทุกเล่ม รูป และวิดีโอ ในเครื่องนี้", "นำสมุดคืน จากไฟล์สำรอง ได้ที่เดียวกัน การนำคืน เพิ่มเฉพาะส่วน ที่ยังไม่มีในเครื่อง ไม่ทับ และไม่ลบ ของที่มีอยู่", "แอปขอให้เบราว์เซอร์ เก็บสมุดในเครื่อง ไว้ถาวร และเตือนให้สำรองสมุด ที่หน้ารายการสมุด เมื่อสมุดเปลี่ยนไป ตั้งแต่สำรองครั้งล่าสุด", "บน iPad และ iPhone ใน Safari แอปชวนให้ เพิ่มลงหน้าจอโฮม เพื่อไม่ให้ Safari ลบสมุด ที่ไม่ได้เปิดนาน ให้สำรองสมุดก่อน แล้วนำคืน ในแอปบนหน้าจอโฮม"]}, {"id": 3, "date": "2026-11-14", "items": ["สารบัญ ของสมุด แตะปุ่มหน้าในสมุด ที่มุมซ้ายบน แล้วเลือก สารบัญ จะเห็นหัวเรื่อง ของทุกหน้า แตะหัวเรื่อง เพื่อไปที่หน้านั้น ได้ทันที", "หัวเรื่อง มาจากข้อความที่พิมพ์ไว้ บนสุดของหน้า หรือบรรทัด ที่ขึ้นต้นด้วย ## ลายมือที่ยังไม่ได้แปลง เป็นตัวพิมพ์ ไม่ขึ้นในสารบัญ", "ที่คั่นหน้า แตะ ปักที่คั่นหน้านี้ ในหน้าสารบัญ แล้วตั้งชื่อเองได้ หน้าที่มีที่คั่น จะมีริบบิ้นสีแดง ที่ภาพหน้า", "ที่คั่นหน้า อยู่กับสมุด ของเราเท่านั้น ผู้เรียนในห้องสด ไม่เห็นที่คั่นหน้า ของครู"]}, {"id": 2, "date": "2026-11-14", "items": ["ค้นหาข้อความ ในทุกสมุดได้แล้ว พิมพ์คำในช่องค้นหาที่เมนู แอปจะค้นทั้งชื่อสมุด ข้อความที่พิมพ์ ลายมือที่แปลงเป็นตัวพิมพ์แล้ว หัวเรื่องของหน้า และข้อความในกล่องต่าง ๆ", "แตะผลการค้นหา เพื่อไปที่หน้านั้น กล่องที่มีคำนั้นจะเรืองแสงสักครู่ ให้เห็นตำแหน่ง", "พิมพ์คำไทย ติดกันหรือเว้นวรรค ก็ค้นเจอเหมือนกัน การค้นหาอ่านสมุดอย่างเดียว ไม่แก้ไขอะไรในสมุด"]}, {"id": 1, "date": "2026-11-13", "items": ["ดูเวอร์ชันของแอปได้ที่เมนู แท็บตั้งค่า หัวข้อเกี่ยวกับแอป", "เมื่อมีเวอร์ชันใหม่ระหว่างใช้งาน แอปจะไม่รีโหลดเอง รวมถึงจอผู้ชม เวอร์ชันใหม่จะมีผล เมื่อเปิดแอปครั้งถัดไป หรือเมื่อแตะแถบ มีเวอร์ชันใหม่", "หน้าที่เปิดค้างไว้ ใช้ส่วนต่าง ๆ ของแอป จากเวอร์ชันเดียวกับตัวเองเสมอ ไม่ปนกับเวอร์ชันใหม่", "เมื่อแอปทำงานผิดพลาด แอปจะส่งรายงาน ให้ผู้พัฒนา โดยส่งเฉพาะ ข้อความแจ้งข้อผิดพลาด ตำแหน่งในโค้ด รุ่นเครื่อง และเวอร์ชันของแอป ไม่ส่งเนื้อหาสมุด ชื่อ หรืออีเมล"]}];
 const TH_MON = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
 function thDay(iso) { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso || ''); return m ? (+m[3]) + ' ' + TH_MON[+m[2] - 1] + ' ' + (+m[1] + 543) : ''; }
 function renderVersion() { const el = $('#verNote'); if (el) el.innerHTML = 'เวอร์ชัน <span class="nowrap">' + esc(VERSION.startsWith('__') ? 'ในเครื่อง (ยังไม่ได้ประกอบ)' : VERSION) + '</span>'; }
@@ -23239,7 +23341,7 @@ async function boot() {
   if (!S.student) { watchLiveDoc(); aiCloudWatch(); devSeen(); }
   curricLoadCustom();
   if (S.store && S.store.kind === 'cloud') Promise.resolve(S.store.get('settings/curric-x')).then((d) => { if (d && d.m) { let m = {}; try { m = JSON.parse(store_ls.get('tp-curric-x') || '{}'); } catch (e) { m = {}; } store_ls.set('tp-curric-x', JSON.stringify(Object.assign(m, d.m))); curricLoadCustom(); } }).catch(() => {});
-  if (!S.student && CLOUD.state === 'on' && store_ls.get('tp-live-on') === '1' && store_ls.get('tp-class') && S.role !== 'student') { LIVE.clsId = store_ls.get('tp-live-cls') || null; LIVE.nbId = store_ls.get('tp-live-nb') || null; LIVE.code = store_ls.get('tp-class'); setTimeout(() => { liveOpen().then(() => toast('ห้องเรียนสด ' + LIVE.code + ' ยังเปิดอยู่ ผู้เรียนเชื่อมต่อได้ตามเดิม', 3000)).catch(() => {}); }, 800); }
+  if (!S.student && CLOUD.state === 'on' && store_ls.get('tp-live-on') === '1' && store_ls.get('tp-class') && S.role !== 'student' && laBoot()) { LIVE.clsId = store_ls.get('tp-live-cls') || null; LIVE.nbId = store_ls.get('tp-live-nb') || null; LIVE.code = store_ls.get('tp-class'); setTimeout(() => { liveOpen().then(() => toast('ห้องเรียนสด ' + LIVE.code + ' ยังเปิดอยู่ ผู้เรียนเชื่อมต่อได้ตามเดิม', 3000)).catch(() => {}); }, 800); }
   renderAcct();
   /* after the question of teacher or student on a new device (asked a moment after opening), not on top of it */
   if (recov && CLOUD.state === 'on' && !S.student) { const ask = (n) => { if (!$('#roleSheet').hidden || (n < 8 && !store_ls.get('tp-role'))) { setTimeout(() => ask(n + 1), 400); return; } acReady().then((ok) => { if (ok) acNewPw(); }); }; setTimeout(() => ask(0), 400); }
