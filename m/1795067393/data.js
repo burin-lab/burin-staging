@@ -25,7 +25,7 @@ async function dataSelection() {
   /* the same ink read as data before (task 8.16) is shown again at once; a graph needs its picture, so a reading made
      for other work is not used here */
   const m = refs.length && !texts ? await inkGet('data', refs) : null, kept = m && typeof m.own === 'string' && m.own ? m.own : '';
-  if (!kept && !needAI('read')) return;
+  if (!kept && !needAIInk('read', refs.length)) return;
   openAI();
   const B = busyCard('อ่านเป็นข้อมูล');
   try {
@@ -220,7 +220,7 @@ async function unitCheck() {
   /* handwriting read before (task 8.16): the lines read for this check are used again at once; another reading of
      the same ink goes to the AI as text, with no picture */
   const m = refs.length ? await inkGet('unit', refs) : null, kept = !texts && m && typeof m.own === 'string' && m.own ? m.own : '', rd = !kept && m && m.text ? m.text : '';
-  if (!kept && !needAI('read')) return;
+  if (!kept && !needAIInk('read', refs.length)) return;
   openAI(); const B = busyCard('ตรวจหน่วยและเลขนัยสำคัญ');
   try {
     await loadLib('math');
