@@ -735,6 +735,14 @@ body.tv .grip { height: 68px; width: 32px; }
 .tgpop > .btn.on, .tgpop > .btn[aria-pressed="true"] { border-color: transparent; }
 /* the selection bar shows the commands used most; "more" shows the rest in the same bar */
 #selbar:not(.allcmd) .sovf { display: none !important; }
+/* task 2.8: commands in groups by what people want to do; a group opens its commands in a row of the same bar */
+#selbar .sgin { display: none !important; }
+@media (max-width: 620px) { #selbar.sgmode .sg { display: contents; } #selbar.sgmode .sg.none, #selbar.sgmode .sg[hidden] { display: none; } }
+.selbar .selsub { flex-basis: 100%; display: flex; flex-wrap: wrap; justify-content: center; gap: 2px; margin-top: 2px; padding-top: 6px; border-top: 1px solid rgba(127, 127, 127, 0.35); }
+.selbar .selsub:empty, .selbar .selsub[hidden] { display: none; }
+.selbar button.sgchip .chev { width: 10px; height: 10px; margin-left: 2px; vertical-align: 1px; }
+.selbar button.sgchip > span { white-space: nowrap; }
+.selbar button.sgchip[aria-expanded="true"] { background: rgba(127, 127, 127, 0.3); box-shadow: inset 0 -3px 0 currentColor; }
 #tabMenu b { font-size: 13px; padding: 6px 12px 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 260px; }
 #tabMenu button { min-height: 44px; text-align: left; padding: 0 12px; border: 0; border-radius: 10px; background: transparent; cursor: pointer; font-size: 14px; }
 #tabMenu button:hover { background: var(--surface-2); }
@@ -7162,30 +7170,91 @@ function showSelbar() {
   $('#sFront').hidden = $('#sBack').hidden = !(m && (S.page.items || []).length > 1);
   $('#sBig').hidden = $('#sSmall').hidden = true;
   $('#sGen').hidden = !n;
-  selFold(); selGroups();
+  if (S.sel !== SG.sel) { SG.sel = S.sel; SG.open = null; }
+  selFold(); sgFold(); selGroups();
   placeSelbar();
 }
-/* the selection bar (task 2.5, switch "groups"): what can be done with the selection decides which commands are there at
-   all; of those, the ones used most show first and the rest wait under "เพิ่มเติม", which shows them in the same bar.
-   Commands that only appear for one kind of selection (a picture, a question, a chemistry line) always stay in sight */
-const SEL_KEEP = ['sKey', 'sOrig', 'sImMeas', 'sCut', 'sCap', 'sBal', 'sProof', 'sJoin'];
-const SEL_RANK = ['sRead', 'sSolve', 'sQuiz', 'sEq', 'sGraph', 'sAnim', 'sHand', 'sTidy', 'sData', 'sUnit', 'sMedia', 'sTrace', 'sFront', 'sBack'];
-const SEL_MAX = 5;
+/* the selection bar (task 2.5, then task 2.8 below): what can be done with the selection decides which commands are there
+   at all; with the switch "groups" on, sgFold puts them in front or in groups. selFold clears what the bar of task 2.5
+   left ("เพิ่มเติม" with the rest in the same bar), which stays hidden now */
 function selFold() {
   const bar = $('#selbar'), more = $('#sMore'); if (!bar || !more) return;
   bar.querySelectorAll('.sovf').forEach((b) => b.classList.remove('sovf'));
   bar.classList.remove('allcmd'); more.setAttribute('aria-expanded', 'false'); more.querySelector('span').textContent = 'เพิ่มเติม';
   more.hidden = true;
-  if (!TGRP.on) return;
-  const shown = SEL_RANK.map((id) => $('#' + id)).filter((b) => b && !b.hidden);
-  const keep = SEL_KEEP.filter((id) => { const b = $('#' + id); return b && !b.hidden; }).length;
-  const extra = shown.slice(Math.max(3, SEL_MAX - keep));
-  if (extra.length < 2) return; /* one more command fits where the "more" button would go */
-  extra.forEach((b) => b.classList.add('sovf')); more.hidden = false;
 }
 function selGroups() {
   const all = $('#selbar').classList.contains('allcmd');
-  for (const g of ['#sgInk', '#sgCalc', '#sgMake', '#sgOrder']) $(g).classList.toggle('none', ![...$(g).children].some((b) => !b.hidden && (all || !b.classList.contains('sovf'))));
+  for (const g of ['#sgFront', '#sgChips', '#sgInk', '#sgCalc', '#sgMake', '#sgOrder']) { const e = $(g); if (e) e.classList.toggle('none', ![...e.children].some((b) => b.tagName === 'BUTTON' && !b.hidden && !b.classList.contains('sgin') && (all || !b.classList.contains('sovf')))); }
+}
+/* task 2.8 (switch "groups"): the bar shows up to three commands used most with this kind of selection, then the groups
+   แปลง เห็นภาพ ตรวจและแก้ จัดวาง; a group with one command left shows that command itself, a group opens its commands
+   in a row of the same bar, so every command is at most two taps away. The buttons are moved, never copied: ids and what
+   they do stay the same, and each goes back to its place before the bar is laid out again or when the switch is off */
+const SEL_GRP = [
+  ['sgbConv', 'แปลง', ['sRead', 'sEq', 'sData', 'sQuiz', 'sHand', 'sOrig'], '<path d="M3 5h7v7H3z M12 10h7v7h-7z M14 5.5h2.5a2 2 0 0 1 2 2V8 M8 16.5H5.5a2 2 0 0 1-2-2V14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>'],
+  ['sgbSee', 'เห็นภาพ', ['sGraph', 'sAnim', 'sTrace', 'sMedia'], '<path d="M2.5 11s3-6 8.5-6 8.5 6 8.5 6-3 6-8.5 6-8.5-6-8.5-6z" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="11" cy="11" r="2.8" fill="none" stroke="currentColor" stroke-width="1.6"/>'],
+  ['sgbCheck', 'ตรวจและแก้', ['sSolve', 'sUnit', 'sBal', 'sProof', 'sImMeas'], '<circle cx="11" cy="11" r="7.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M7.5 11.2l2.4 2.4 4.6-5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>'],
+  ['sgbArr', 'จัดวาง', ['sTidy', 'sJoin', 'sCut', 'sCap', 'sFront', 'sBack'], '<rect x="3" y="4" width="16" height="4" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.6"/><rect x="3" y="10.5" width="10" height="4" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M3 18h13" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>']
+];
+const SEL_FRONT = 3;
+const SG = { marks: {}, open: null };
+/* the commands used most with what is selected, best first: handwriting, a typed line with mathematics, a table, plain
+   typed text, one picture, one other box; the subject of the notebook decides the checking command */
+function selFrontIds() {
+  const sel = S.sel || { strokes: [], items: [] }, n = sel.strokes.length, its = sel.items.map(findItem).filter(Boolean);
+  const subj = (S.nb && S.nb.subject) || 'phys', chk = subj === 'chem' || subj === 'sci' ? 'sBal' : subj === 'math' ? 'sProof' : 'sUnit';
+  const isText = (it) => !it.type || it.type === 'text';
+  if (n) return its.length ? ['sRead', 'sQuiz', 'sGraph'] : ['sRead', subj === 'chem' ? 'sBal' : 'sSolve', 'sQuiz'];
+  if (its.length && its.every(isText)) {
+    const md = its.map((it) => it.md || '').join('\n');
+    if (/\|\s*-{3}/.test(md)) return ['sData', 'sGraph', 'sCap'];
+    if (/\$|\\ce\{|[=<>]|\d\s*[+\-*/^]\s*\d/.test(md)) return ['sSolve', 'sGraph', chk];
+    return ['sQuiz', 'sHand', 'sJoin'];
+  }
+  if (its.length === 1 && its[0].type === 'img') return ['sImMeas', 'sCut', 'sCap'];
+  if (its.length === 1) return ['sCap', 'sAnim'];
+  return ['sQuiz', 'sGraph', 'sFront'];
+}
+function sgPark(b) { if (!SG.marks[b.id]) { const mk = document.createComment(b.id); b.before(mk); SG.marks[b.id] = mk; } }
+function sgHome() { for (const id in SG.marks) { const b = $('#' + id), mk = SG.marks[id]; if (b && mk && mk.parentNode && b.previousSibling !== mk) mk.after(b); if (b) b.classList.remove('sgin'); } }
+function sgFold() {
+  const bar = $('#selbar'); if (!bar) return;
+  sgHome();
+  const on = TGRP.on;
+  if (!$('#sgFront')) {
+    if (!on) return;
+    const front = document.createElement('span'); front.className = 'sg'; front.id = 'sgFront';
+    const chips = document.createElement('span'); chips.className = 'sg'; chips.id = 'sgChips';
+    const sub = document.createElement('div'); sub.className = 'selsub'; sub.id = 'selSub'; sub.setAttribute('role', 'group');
+    $('#sgInk').before(front, chips); bar.insertBefore(sub, $('#sBig'));
+    for (const [id, label, , icon] of SEL_GRP) {
+      const c = document.createElement('button'); c.type = 'button'; c.id = id; c.className = 'sgchip'; c.setAttribute('aria-expanded', 'false');
+      c.innerHTML = '<svg viewBox="0 0 22 22" aria-hidden="true">' + icon + '</svg><span>' + label + '<svg class="chev" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 3.5l3 3 3-3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></span>';
+      c.onclick = (e) => { e.stopPropagation(); SG.open = SG.open === id ? null : id; sgFold(); selGroups(); placeSelbar(); };
+      chips.appendChild(c);
+    }
+  }
+  const front = $('#sgFront'), chips = $('#sgChips'), sub = $('#selSub');
+  front.hidden = chips.hidden = sub.hidden = !on; bar.classList.toggle('sgmode', on);
+  if (!on) { SG.open = null; return; }
+  $('#sMore').hidden = true;
+  const vis = (id) => { const b = $('#' + id); return b && !b.hidden ? b : null; };
+  /* "ขยับได้" (make it move) is what learners love most (the owner, 20 Nov 2026): first whenever it can be used, in the
+     same look as the other commands.
+     The result of a calculation and "ลายมือเดิม" (undo a conversion) belong to this selection only: always in front */
+  const first = ['sAnim', 'sAns', 'sOrig'].map(vis).filter(Boolean);
+  const pick = selFrontIds().map(vis).filter((b) => b && first.indexOf(b) < 0).slice(0, SEL_FRONT - (first.indexOf($('#sAnim')) >= 0 && innerWidth <= 620 ? 1 : 0)); /* a phone keeps two rows */
+  for (const b of first.concat(pick)) { sgPark(b); front.appendChild(b); }
+  const placed = new Set(first.concat(pick));
+  for (const [gid, , ids] of SEL_GRP) {
+    const chip = $('#' + gid), rest = ids.map(vis).filter((b) => b && !placed.has(b));
+    chip.hidden = rest.length < 2; chip.setAttribute('aria-expanded', 'false');
+    if (rest.length === 1) { sgPark(rest[0]); chips.insertBefore(rest[0], chip); continue; }
+    for (const b of rest) b.classList.add('sgin');
+    if (SG.open === gid && rest.length > 1) { chip.setAttribute('aria-expanded', 'true'); for (const b of rest) { sgPark(b); b.classList.remove('sgin'); sub.appendChild(b); } }
+  }
+  if (SG.open && $('#' + SG.open).hidden) SG.open = null;
 }
 function selMore() {
   const bar = $('#selbar'), more = $('#sMore'), all = !bar.classList.contains('allcmd');
@@ -7199,6 +7268,7 @@ function placeSelbar() {
   const k = pr.width / W, b = S.sel.box;
   const L = pr.left + b[0] * k - hr.left, R = pr.left + b[2] * k - hr.left, T = pr.top + b[1] * k - hr.top, B = pr.top + b[3] * k - hr.top;
   bar.classList.add('floating');
+  if (bar.classList.contains('sgmode')) bar.style.left = '8px'; /* lay out at the full width first, so a narrow screen gets as few rows as it can */
   { /* a group that starts a new row has no divider line on its left */ let top = null; for (const g of bar.querySelectorAll('.sg')) { if (g.classList.contains('none')) continue; g.classList.remove('rowstart'); const t = g.offsetTop; g.classList.toggle('rowstart', top != null && t > top + 4); top = t; } }
   const bw = bar.offsetWidth, bh = bar.offsetHeight, pad = 10;
   let x = clamp((L + R) / 2 - bw / 2, 8, Math.max(8, hr.width - bw - 8));
@@ -21965,7 +22035,7 @@ async function deckExportPptx() {
 }
 
 /* ---------- new version notice (own website only) ---------- */
-const BUILD = '1795200312';
+const BUILD = '1795215207';
 let updShown = false;
 async function checkUpdate() {
   if (BUILD.startsWith('__') || (window.claude && window.claude.use) || updShown || !navigator.onLine) return;
@@ -21991,8 +22061,8 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) chec
 setInterval(checkUpdate, 30 * 60 * 1000); setTimeout(checkUpdate, 8000);
 
 /* ---------- version and what is new ---------- */
-const VERSION = '20261120-5b9f2dde';
-const NEWS = [{"id": 21, "date": "2026-11-20", "items": ["ออร์บิทัล s p d และ sp³ ที่วาดด้วยเครื่องมือรูปทรง เป็นสามมิติแล้ว ลากเพื่อหมุนดูได้ทุกทิศ ใช้สองนิ้วย่อขยาย แตะสองครั้งกลับมุมเดิม", "รูปเวกเตอร์สามมิติ ย่อขยายด้วยสองนิ้วได้ และแตะสองครั้งกลับมุมเดิม"]}, {"id": 20, "date": "2026-11-20", "items": ["ต่อสาย จอสะอาด แบบ ทั้งหน้า เห็นหน้าครบถึงขอบล่าง พอดีความสูงจอ และพื้นรอบหน้าเป็นสีดำ โปรเจกเตอร์จึงฉายแสงเฉพาะหน้ากระดาษ"]}, {"id": 19, "date": "2026-11-20", "items": ["ขยายหน้าจออยู่ มีปุ่ม หน้าใหม่ ข้างเลขหน้าที่มุมล่าง แตะครั้งเดียวได้หน้าใหม่ต่อจากหน้านี้ ขยายเท่าเดิม พร้อมเขียนที่มุมบนซ้าย"]}, {"id": 18, "date": "2026-11-19", "items": ["เขียนตอนขยายหน้าจอ เส้นไม่หดตรงมุมเมื่อยกปากกาแล้ว ตัวอักษรอยู่ตรงที่เขียนเหมือนตอนกำลังเขียน", "ขยายหน้าจอแล้วพักปากกาครู่หนึ่งขณะเขียน ตัวอักษรไม่ถูกเปลี่ยนเป็นรูปทรงอีก วาดค้างไว้ให้เป็นรูปทรงยังใช้ได้กับรูปที่ใหญ่กว่าลายมือบนหน้า", "ห้องเรียนสดที่ครูเปิด PDF แอปของนักเรียนไม่ปิดเองเพราะหน่วยความจำเต็มอีก"]}, {"id": 17, "date": "2026-11-18", "items": ["มอบหมายการบ้าน กดปุ่มแล้วขึ้น กำลังมอบหมาย และ มอบหมายแล้ว กดซ้ำไม่ได้ จึงไม่มีการบ้านซ้ำ ลิงก์กับ QR เลื่อนขึ้นมาให้เห็นทันที"]}, {"id": 16, "date": "2026-11-18", "items": ["ตั้งค่าคลาวด์ใหม่ ที่เมนู แท็บ บัญชี ซิงก์ และ AI ใช้คลาวด์ BURIN ได้ทันทีโดยไม่ต้องตั้งค่า", "ใช้ Supabase ของตัวเองได้ในหัวข้อ ขั้นสูง และสลับกลับมาคลาวด์ BURIN ได้ทุกเมื่อ สมุดทั้งสองที่ไม่หาย"]}, {"id": 15, "date": "2026-11-18", "items": ["ลืมรหัสผ่าน ตั้งรหัสใหม่ได้จากหน้าเข้าสู่ระบบ กด ลืมรหัสผ่าน แล้วทำตามอีเมลที่ได้รับ", "สมัครบัญชีใหม่แล้วยืนยันอีเมลได้ในแอป และกดส่งอีเมลยืนยันอีกครั้งได้"]}, {"id": 14, "date": "2026-11-18", "items": ["ห้องเรียนสดที่ลืมปิดปิดเอง เมื่อกลับมาที่แอปหลังห่างไปเกิน 1 ชั่วโมง ห้องไม่เปิดต่อเองและไม่ส่งสิ่งที่เขียนให้ผู้เรียน แตะ เปิดห้องเดิมอีกครั้ง ได้รหัสเดิม", "ห้องที่ไม่มีผู้เรียนและครูไม่ได้ใช้แอปนาน 30 นาทีปิดเอง มีแถบบอกก่อน 1 นาที ครูที่กำลังสอนห้องไม่ปิด แม้ผู้เรียนล็อกจอ", "ปิดห้องแล้วผู้เรียนยังส่งการบ้านได้ถึงเวลาที่กำหนด และเห็นปุ่มไปที่งานของฉัน"]}, {"id": 13, "date": "2026-11-17", "items": ["ข้อความที่พิมพ์ไม่ต้องรอ AI สมการที่พิมพ์ เช่น y = 2x + 1 สร้างกราฟได้ทันที ตารางที่พิมพ์เป็นข้อมูลได้ทันที และตรวจหน่วยของบรรทัดคำนวณที่พิมพ์ได้ทันที ใช้ได้แม้ไม่มีอินเทอร์เน็ต", "วาดใหม่ จัดเส้นตรง สี่เหลี่ยม วงกลม ในภาพร่างให้เรียบร้อยทันทีโดยไม่ใช้ AI ตัวอักษรยังเป็นลายมือเดิม ถ้าต้องการให้แก้ตามเนื้อหา กด ให้ AI วาดใหม่ตามเนื้อหา", "หลังทำแบบฝึก บทที่ยังอ่อนบอกชนิดข้อที่พลาด และความเข้าใจที่ควรแก้จากตัวเลือกที่ตอบ"]}, {"id": 12, "date": "2026-11-17", "items": ["ลายมือที่ AI อ่านแล้วไม่ต้องอ่านซ้ำ แปลงเป็นตัวพิมพ์ แก้สมการ สร้างรูป ตรวจหน่วย และสร้างโจทย์ จากลายมือเดิมใช้คำที่อ่านไว้ เร็วขึ้นและไม่ส่งภาพซ้ำ ถ้าอ่านผิด สั่งงานเดิมอีกครั้ง AI จะอ่านใหม่", "ค้นหาในทุกสมุดพบลายมือที่ AI เคยอ่านแล้วด้วย"]}, {"id": 11, "date": "2026-11-17", "items": ["ทดลองวางวัตถุสามมิติบนโต๊ะจริง (AR) ได้ที่ ปุ่ม สมุดทั้งหมด แท็บ ภาษา การเขียน และจอ หัวข้อ ลองดูในห้องจริง ใช้ได้บน iPad และ iPhone แอปสร้างไฟล์ในเครื่องเอง ไม่ใช้ AI"]}, {"id": 10, "date": "2026-11-17", "items": ["คอมที่ต่อจอที่สอง เลือก จอที่สอง ผู้ชมไม่เห็นแถบ ในเมนู นำเสนอ ครูใช้ได้ทุกคำสั่ง จอใหญ่เห็นแต่หน้ากระดาษ ไม่ต้องใช้อินเทอร์เน็ต", "ระหว่างเปิดจอผู้ชม ครูมีแถบเล็ก จอผู้ชม เลือกให้จอใหญ่เห็นทั้งหน้า พักจอ หรือปิด (ปุ่ม B บนคีย์บอร์ดหรือรีโมตก็พักจอได้)", "ต่อ iPad ออกทีวีด้วยสาย ใช้ ต่อสาย จอสะอาด ในเมนู นำเสนอ (ปุ่ม สอนและนำเสนอ)", "เริ่มแล้วจอเห็นแต่หน้ากระดาษ ไม่มีแถบหรือปุ่มใดขึ้นเลย ทั้งบน iPad และทีวี", "ก่อนเริ่ม เลือกปากกาให้แต่ละขอบจอ (สี ไฮไลต์ ยางลบ หรือเลเซอร์) ระหว่างนำเสนอ แตะขอบจอด้วยนิ้วเพื่อหยิบปากกาของขอบนั้น", "เลือกได้ว่าให้เห็นทั้งหน้า และเริ่มด้วยม่านบังครึ่งล่างที่ใช้นิ้วลากลงเพื่อเปิดทีละบรรทัด", "แตะค้างสามนิ้ว 1 วินาที เพื่อออก ใช้รีโมตนำเสนอเปลี่ยนหน้า ปุ่ม B พักจอ ปุ่ม Esc ออก", "เมนู นำเสนอ เหลือสามข้อ จอแสดงผลแบบนักเรียนบนอีกเครื่องและบนจอที่สองรวมเป็นข้อเดียว"]}, {"id": 9, "date": "2026-11-17", "items": ["แถบบนเหลือปุ่มน้อยลง ปุ่มที่ใช้นาน ๆ ครั้ง รวมอยู่ในสองกลุ่ม", "ปุ่ม ต่อยอดจากหน้า มี แปลงเป็นตัวพิมพ์ สร้างโจทย์ และ ชุดโจทย์", "ปุ่ม สอนและนำเสนอ มี ห้องสด นำเสนอ และ ห้องเรียนและโจทย์ (ฝั่งนักเรียนชื่อ ห้องเรียน มี สแกน QR และ เข้าห้องเรียน ด้วย)", "เลือกด้วยบ่วงแล้ว แถบเหนือส่วนที่เลือก แสดงคำสั่งที่ใช้บ่อยก่อน คำสั่งอื่นอยู่ที่ปุ่ม เพิ่มเติม", "หาคำสั่งไม่เจอ พิมพ์ชื่อในช่องค้นหาที่เมนู เช่น PDF หรือ สามมิติ แล้วแตะคำสั่งที่ขึ้นมา"]}, {"id": 8, "date": "2026-11-16", "items": ["สร้างโจทย์ด้วย AI จากกี่หน้าก็ได้ ทั้งเล่ม ตามบท หรือเป็นช่วงหน้า", "อยู่ที่ปุ่ม สร้างโจทย์ด้วย AI หัวข้อ หน้าที่ใช้สร้างโจทย์ แตะ ทั้งเล่ม หรือแตะชื่อบท หรือใส่ช่วงหน้า แล้วกด เลือกช่วงนี้", "หน้าที่ AI อ่านแล้ว เก็บไว้ในเครื่องนี้ ครั้งต่อไป ไม่ต้องอ่านซ้ำ จึงเร็วขึ้น และประหยัดค่า AI"]}, {"id": 7, "date": "2026-11-16", "items": ["ลบผิด หรือเขียนทับผิด ดึงหน้า เมื่อไม่กี่นาทีก่อน หรือเมื่อวาน กลับมาได้", "อยู่ที่ ลิ้นชักหน้า แตะแถบ หน้านี้ ด้านล่าง แล้วกดปุ่ม รุ่นก่อนของหน้านี้ เลือกรุ่น ดูภาพหน้าก่อน แล้วกด คืนหน้าเป็นรุ่นนี้", "หน้าก่อนคืน ถูกเก็บไว้ด้วย จึงย้อนกลับได้ แอปเก็บรุ่นก่อน ไว้ในเครื่องนี้ 30 วัน"]}, {"id": 6, "date": "2026-11-16", "items": ["บัญชีคลาวด์ ส่งออกข้อมูลทั้งบัญชี เป็นไฟล์เดียวได้ ทั้งสมุด หน้า หมึก รูป วิดีโอ เลคเชอร์ที่แชร์ การบ้าน และงานที่นักเรียนส่ง", "อยู่ที่ เมนู แท็บตั้งค่า หัวข้อ ข้อมูลทั้งบัญชี กดปุ่ม ส่งออกทั้งบัญชี", "นำเข้าไฟล์นี้ ในบัญชีอื่น หรือเครื่องใหม่ได้ การนำเข้า เพิ่มเฉพาะส่วนที่ยังไม่มี ไม่ทับ และไม่ลบ ของที่มีอยู่"]}, {"id": 5, "date": "2026-11-15", "items": ["ลบสมุด หรือลบหน้าแล้ว ยังกู้คืนได้ ภายใน 30 วัน สิ่งที่ลบ ไปอยู่ในถังขยะ ก่อนถูกลบจริง", "เปิดถังขยะ ได้ที่ เมนู สมุดทั้งหมด ปุ่มถังขยะ ใต้รายการสมุด กดกู้คืน แล้วสมุดกลับไป ที่เดิม หน้ากลับไป ตำแหน่งเดิม ในสมุด", "ลบถาวร ทีละรายการ หรือลบทั้งหมด ในถังขยะได้ ครบ 30 วัน แล้วแอปลบให้เอง"]}, {"id": 4, "date": "2026-11-15", "items": ["สำรองสมุด ทั้งหมดเป็นไฟล์เดียว ได้ที่ เมนู แท็บตั้งค่า หัวข้อ สมุดในเครื่องนี้ ไฟล์เก็บสมุดทุกเล่ม รูป และวิดีโอ ในเครื่องนี้", "นำสมุดคืน จากไฟล์สำรอง ได้ที่เดียวกัน การนำคืน เพิ่มเฉพาะส่วน ที่ยังไม่มีในเครื่อง ไม่ทับ และไม่ลบ ของที่มีอยู่", "แอปขอให้เบราว์เซอร์ เก็บสมุดในเครื่อง ไว้ถาวร และเตือนให้สำรองสมุด ที่หน้ารายการสมุด เมื่อสมุดเปลี่ยนไป ตั้งแต่สำรองครั้งล่าสุด", "บน iPad และ iPhone ใน Safari แอปชวนให้ เพิ่มลงหน้าจอโฮม เพื่อไม่ให้ Safari ลบสมุด ที่ไม่ได้เปิดนาน ให้สำรองสมุดก่อน แล้วนำคืน ในแอปบนหน้าจอโฮม"]}, {"id": 3, "date": "2026-11-14", "items": ["สารบัญ ของสมุด แตะปุ่มหน้าในสมุด ที่มุมซ้ายบน แล้วเลือก สารบัญ จะเห็นหัวเรื่อง ของทุกหน้า แตะหัวเรื่อง เพื่อไปที่หน้านั้น ได้ทันที", "หัวเรื่อง มาจากข้อความที่พิมพ์ไว้ บนสุดของหน้า หรือบรรทัด ที่ขึ้นต้นด้วย ## ลายมือที่ยังไม่ได้แปลง เป็นตัวพิมพ์ ไม่ขึ้นในสารบัญ", "ที่คั่นหน้า แตะ ปักที่คั่นหน้านี้ ในหน้าสารบัญ แล้วตั้งชื่อเองได้ หน้าที่มีที่คั่น จะมีริบบิ้นสีแดง ที่ภาพหน้า", "ที่คั่นหน้า อยู่กับสมุด ของเราเท่านั้น ผู้เรียนในห้องสด ไม่เห็นที่คั่นหน้า ของครู"]}, {"id": 2, "date": "2026-11-14", "items": ["ค้นหาข้อความ ในทุกสมุดได้แล้ว พิมพ์คำในช่องค้นหาที่เมนู แอปจะค้นทั้งชื่อสมุด ข้อความที่พิมพ์ ลายมือที่แปลงเป็นตัวพิมพ์แล้ว หัวเรื่องของหน้า และข้อความในกล่องต่าง ๆ", "แตะผลการค้นหา เพื่อไปที่หน้านั้น กล่องที่มีคำนั้นจะเรืองแสงสักครู่ ให้เห็นตำแหน่ง", "พิมพ์คำไทย ติดกันหรือเว้นวรรค ก็ค้นเจอเหมือนกัน การค้นหาอ่านสมุดอย่างเดียว ไม่แก้ไขอะไรในสมุด"]}, {"id": 1, "date": "2026-11-13", "items": ["ดูเวอร์ชันของแอปได้ที่เมนู แท็บตั้งค่า หัวข้อเกี่ยวกับแอป", "เมื่อมีเวอร์ชันใหม่ระหว่างใช้งาน แอปจะไม่รีโหลดเอง รวมถึงจอผู้ชม เวอร์ชันใหม่จะมีผล เมื่อเปิดแอปครั้งถัดไป หรือเมื่อแตะแถบ มีเวอร์ชันใหม่", "หน้าที่เปิดค้างไว้ ใช้ส่วนต่าง ๆ ของแอป จากเวอร์ชันเดียวกับตัวเองเสมอ ไม่ปนกับเวอร์ชันใหม่", "เมื่อแอปทำงานผิดพลาด แอปจะส่งรายงาน ให้ผู้พัฒนา โดยส่งเฉพาะ ข้อความแจ้งข้อผิดพลาด ตำแหน่งในโค้ด รุ่นเครื่อง และเวอร์ชันของแอป ไม่ส่งเนื้อหาสมุด ชื่อ หรืออีเมล"]}];
+const VERSION = '20261120-aad8df03';
+const NEWS = [{"id": 22, "date": "2026-11-20", "items": ["ออร์บิทัล s p d และ sp³ ที่วาดด้วยเครื่องมือรูปทรง เป็นสามมิติแล้ว ลากเพื่อหมุนดูได้ทุกทิศ ใช้สองนิ้วย่อขยาย แตะสองครั้งกลับมุมเดิม", "รูปเวกเตอร์สามมิติ ย่อขยายด้วยสองนิ้วได้ และแตะสองครั้งกลับมุมเดิม"]}, {"id": 21, "date": "2026-11-20", "items": ["แถบคำสั่งหลังเลือกด้วยบ่วงบาศก์ ปุ่ม ขยับได้ เป็นปุ่มแรกทุกครั้งที่ใช้ได้ ตามด้วยคำสั่งที่ใช้บ่อยกับสิ่งที่เลือกสามปุ่มข้างหน้า ที่เหลืออยู่ในกลุ่ม แปลง เห็นภาพ ตรวจและแก้ จัดวาง แตะกลุ่มแล้วคำสั่งขึ้นในแถบเดิม บน iPad แถบเหลือแถวเดียว บนมือถือสองแถว"]}, {"id": 20, "date": "2026-11-20", "items": ["ต่อสาย จอสะอาด แบบ ทั้งหน้า เห็นหน้าครบถึงขอบล่าง พอดีความสูงจอ และพื้นรอบหน้าเป็นสีดำ โปรเจกเตอร์จึงฉายแสงเฉพาะหน้ากระดาษ"]}, {"id": 19, "date": "2026-11-20", "items": ["ขยายหน้าจออยู่ มีปุ่ม หน้าใหม่ ข้างเลขหน้าที่มุมล่าง แตะครั้งเดียวได้หน้าใหม่ต่อจากหน้านี้ ขยายเท่าเดิม พร้อมเขียนที่มุมบนซ้าย"]}, {"id": 18, "date": "2026-11-19", "items": ["เขียนตอนขยายหน้าจอ เส้นไม่หดตรงมุมเมื่อยกปากกาแล้ว ตัวอักษรอยู่ตรงที่เขียนเหมือนตอนกำลังเขียน", "ขยายหน้าจอแล้วพักปากกาครู่หนึ่งขณะเขียน ตัวอักษรไม่ถูกเปลี่ยนเป็นรูปทรงอีก วาดค้างไว้ให้เป็นรูปทรงยังใช้ได้กับรูปที่ใหญ่กว่าลายมือบนหน้า", "ห้องเรียนสดที่ครูเปิด PDF แอปของนักเรียนไม่ปิดเองเพราะหน่วยความจำเต็มอีก"]}, {"id": 17, "date": "2026-11-18", "items": ["มอบหมายการบ้าน กดปุ่มแล้วขึ้น กำลังมอบหมาย และ มอบหมายแล้ว กดซ้ำไม่ได้ จึงไม่มีการบ้านซ้ำ ลิงก์กับ QR เลื่อนขึ้นมาให้เห็นทันที"]}, {"id": 16, "date": "2026-11-18", "items": ["ตั้งค่าคลาวด์ใหม่ ที่เมนู แท็บ บัญชี ซิงก์ และ AI ใช้คลาวด์ BURIN ได้ทันทีโดยไม่ต้องตั้งค่า", "ใช้ Supabase ของตัวเองได้ในหัวข้อ ขั้นสูง และสลับกลับมาคลาวด์ BURIN ได้ทุกเมื่อ สมุดทั้งสองที่ไม่หาย"]}, {"id": 15, "date": "2026-11-18", "items": ["ลืมรหัสผ่าน ตั้งรหัสใหม่ได้จากหน้าเข้าสู่ระบบ กด ลืมรหัสผ่าน แล้วทำตามอีเมลที่ได้รับ", "สมัครบัญชีใหม่แล้วยืนยันอีเมลได้ในแอป และกดส่งอีเมลยืนยันอีกครั้งได้"]}, {"id": 14, "date": "2026-11-18", "items": ["ห้องเรียนสดที่ลืมปิดปิดเอง เมื่อกลับมาที่แอปหลังห่างไปเกิน 1 ชั่วโมง ห้องไม่เปิดต่อเองและไม่ส่งสิ่งที่เขียนให้ผู้เรียน แตะ เปิดห้องเดิมอีกครั้ง ได้รหัสเดิม", "ห้องที่ไม่มีผู้เรียนและครูไม่ได้ใช้แอปนาน 30 นาทีปิดเอง มีแถบบอกก่อน 1 นาที ครูที่กำลังสอนห้องไม่ปิด แม้ผู้เรียนล็อกจอ", "ปิดห้องแล้วผู้เรียนยังส่งการบ้านได้ถึงเวลาที่กำหนด และเห็นปุ่มไปที่งานของฉัน"]}, {"id": 13, "date": "2026-11-17", "items": ["ข้อความที่พิมพ์ไม่ต้องรอ AI สมการที่พิมพ์ เช่น y = 2x + 1 สร้างกราฟได้ทันที ตารางที่พิมพ์เป็นข้อมูลได้ทันที และตรวจหน่วยของบรรทัดคำนวณที่พิมพ์ได้ทันที ใช้ได้แม้ไม่มีอินเทอร์เน็ต", "วาดใหม่ จัดเส้นตรง สี่เหลี่ยม วงกลม ในภาพร่างให้เรียบร้อยทันทีโดยไม่ใช้ AI ตัวอักษรยังเป็นลายมือเดิม ถ้าต้องการให้แก้ตามเนื้อหา กด ให้ AI วาดใหม่ตามเนื้อหา", "หลังทำแบบฝึก บทที่ยังอ่อนบอกชนิดข้อที่พลาด และความเข้าใจที่ควรแก้จากตัวเลือกที่ตอบ"]}, {"id": 12, "date": "2026-11-17", "items": ["ลายมือที่ AI อ่านแล้วไม่ต้องอ่านซ้ำ แปลงเป็นตัวพิมพ์ แก้สมการ สร้างรูป ตรวจหน่วย และสร้างโจทย์ จากลายมือเดิมใช้คำที่อ่านไว้ เร็วขึ้นและไม่ส่งภาพซ้ำ ถ้าอ่านผิด สั่งงานเดิมอีกครั้ง AI จะอ่านใหม่", "ค้นหาในทุกสมุดพบลายมือที่ AI เคยอ่านแล้วด้วย"]}, {"id": 11, "date": "2026-11-17", "items": ["ทดลองวางวัตถุสามมิติบนโต๊ะจริง (AR) ได้ที่ ปุ่ม สมุดทั้งหมด แท็บ ภาษา การเขียน และจอ หัวข้อ ลองดูในห้องจริง ใช้ได้บน iPad และ iPhone แอปสร้างไฟล์ในเครื่องเอง ไม่ใช้ AI"]}, {"id": 10, "date": "2026-11-17", "items": ["คอมที่ต่อจอที่สอง เลือก จอที่สอง ผู้ชมไม่เห็นแถบ ในเมนู นำเสนอ ครูใช้ได้ทุกคำสั่ง จอใหญ่เห็นแต่หน้ากระดาษ ไม่ต้องใช้อินเทอร์เน็ต", "ระหว่างเปิดจอผู้ชม ครูมีแถบเล็ก จอผู้ชม เลือกให้จอใหญ่เห็นทั้งหน้า พักจอ หรือปิด (ปุ่ม B บนคีย์บอร์ดหรือรีโมตก็พักจอได้)", "ต่อ iPad ออกทีวีด้วยสาย ใช้ ต่อสาย จอสะอาด ในเมนู นำเสนอ (ปุ่ม สอนและนำเสนอ)", "เริ่มแล้วจอเห็นแต่หน้ากระดาษ ไม่มีแถบหรือปุ่มใดขึ้นเลย ทั้งบน iPad และทีวี", "ก่อนเริ่ม เลือกปากกาให้แต่ละขอบจอ (สี ไฮไลต์ ยางลบ หรือเลเซอร์) ระหว่างนำเสนอ แตะขอบจอด้วยนิ้วเพื่อหยิบปากกาของขอบนั้น", "เลือกได้ว่าให้เห็นทั้งหน้า และเริ่มด้วยม่านบังครึ่งล่างที่ใช้นิ้วลากลงเพื่อเปิดทีละบรรทัด", "แตะค้างสามนิ้ว 1 วินาที เพื่อออก ใช้รีโมตนำเสนอเปลี่ยนหน้า ปุ่ม B พักจอ ปุ่ม Esc ออก", "เมนู นำเสนอ เหลือสามข้อ จอแสดงผลแบบนักเรียนบนอีกเครื่องและบนจอที่สองรวมเป็นข้อเดียว"]}, {"id": 9, "date": "2026-11-17", "items": ["แถบบนเหลือปุ่มน้อยลง ปุ่มที่ใช้นาน ๆ ครั้ง รวมอยู่ในสองกลุ่ม", "ปุ่ม ต่อยอดจากหน้า มี แปลงเป็นตัวพิมพ์ สร้างโจทย์ และ ชุดโจทย์", "ปุ่ม สอนและนำเสนอ มี ห้องสด นำเสนอ และ ห้องเรียนและโจทย์ (ฝั่งนักเรียนชื่อ ห้องเรียน มี สแกน QR และ เข้าห้องเรียน ด้วย)", "เลือกด้วยบ่วงแล้ว แถบเหนือส่วนที่เลือก แสดงคำสั่งที่ใช้บ่อยก่อน คำสั่งอื่นอยู่ที่ปุ่ม เพิ่มเติม", "หาคำสั่งไม่เจอ พิมพ์ชื่อในช่องค้นหาที่เมนู เช่น PDF หรือ สามมิติ แล้วแตะคำสั่งที่ขึ้นมา"]}, {"id": 8, "date": "2026-11-16", "items": ["สร้างโจทย์ด้วย AI จากกี่หน้าก็ได้ ทั้งเล่ม ตามบท หรือเป็นช่วงหน้า", "อยู่ที่ปุ่ม สร้างโจทย์ด้วย AI หัวข้อ หน้าที่ใช้สร้างโจทย์ แตะ ทั้งเล่ม หรือแตะชื่อบท หรือใส่ช่วงหน้า แล้วกด เลือกช่วงนี้", "หน้าที่ AI อ่านแล้ว เก็บไว้ในเครื่องนี้ ครั้งต่อไป ไม่ต้องอ่านซ้ำ จึงเร็วขึ้น และประหยัดค่า AI"]}, {"id": 7, "date": "2026-11-16", "items": ["ลบผิด หรือเขียนทับผิด ดึงหน้า เมื่อไม่กี่นาทีก่อน หรือเมื่อวาน กลับมาได้", "อยู่ที่ ลิ้นชักหน้า แตะแถบ หน้านี้ ด้านล่าง แล้วกดปุ่ม รุ่นก่อนของหน้านี้ เลือกรุ่น ดูภาพหน้าก่อน แล้วกด คืนหน้าเป็นรุ่นนี้", "หน้าก่อนคืน ถูกเก็บไว้ด้วย จึงย้อนกลับได้ แอปเก็บรุ่นก่อน ไว้ในเครื่องนี้ 30 วัน"]}, {"id": 6, "date": "2026-11-16", "items": ["บัญชีคลาวด์ ส่งออกข้อมูลทั้งบัญชี เป็นไฟล์เดียวได้ ทั้งสมุด หน้า หมึก รูป วิดีโอ เลคเชอร์ที่แชร์ การบ้าน และงานที่นักเรียนส่ง", "อยู่ที่ เมนู แท็บตั้งค่า หัวข้อ ข้อมูลทั้งบัญชี กดปุ่ม ส่งออกทั้งบัญชี", "นำเข้าไฟล์นี้ ในบัญชีอื่น หรือเครื่องใหม่ได้ การนำเข้า เพิ่มเฉพาะส่วนที่ยังไม่มี ไม่ทับ และไม่ลบ ของที่มีอยู่"]}, {"id": 5, "date": "2026-11-15", "items": ["ลบสมุด หรือลบหน้าแล้ว ยังกู้คืนได้ ภายใน 30 วัน สิ่งที่ลบ ไปอยู่ในถังขยะ ก่อนถูกลบจริง", "เปิดถังขยะ ได้ที่ เมนู สมุดทั้งหมด ปุ่มถังขยะ ใต้รายการสมุด กดกู้คืน แล้วสมุดกลับไป ที่เดิม หน้ากลับไป ตำแหน่งเดิม ในสมุด", "ลบถาวร ทีละรายการ หรือลบทั้งหมด ในถังขยะได้ ครบ 30 วัน แล้วแอปลบให้เอง"]}, {"id": 4, "date": "2026-11-15", "items": ["สำรองสมุด ทั้งหมดเป็นไฟล์เดียว ได้ที่ เมนู แท็บตั้งค่า หัวข้อ สมุดในเครื่องนี้ ไฟล์เก็บสมุดทุกเล่ม รูป และวิดีโอ ในเครื่องนี้", "นำสมุดคืน จากไฟล์สำรอง ได้ที่เดียวกัน การนำคืน เพิ่มเฉพาะส่วน ที่ยังไม่มีในเครื่อง ไม่ทับ และไม่ลบ ของที่มีอยู่", "แอปขอให้เบราว์เซอร์ เก็บสมุดในเครื่อง ไว้ถาวร และเตือนให้สำรองสมุด ที่หน้ารายการสมุด เมื่อสมุดเปลี่ยนไป ตั้งแต่สำรองครั้งล่าสุด", "บน iPad และ iPhone ใน Safari แอปชวนให้ เพิ่มลงหน้าจอโฮม เพื่อไม่ให้ Safari ลบสมุด ที่ไม่ได้เปิดนาน ให้สำรองสมุดก่อน แล้วนำคืน ในแอปบนหน้าจอโฮม"]}, {"id": 3, "date": "2026-11-14", "items": ["สารบัญ ของสมุด แตะปุ่มหน้าในสมุด ที่มุมซ้ายบน แล้วเลือก สารบัญ จะเห็นหัวเรื่อง ของทุกหน้า แตะหัวเรื่อง เพื่อไปที่หน้านั้น ได้ทันที", "หัวเรื่อง มาจากข้อความที่พิมพ์ไว้ บนสุดของหน้า หรือบรรทัด ที่ขึ้นต้นด้วย ## ลายมือที่ยังไม่ได้แปลง เป็นตัวพิมพ์ ไม่ขึ้นในสารบัญ", "ที่คั่นหน้า แตะ ปักที่คั่นหน้านี้ ในหน้าสารบัญ แล้วตั้งชื่อเองได้ หน้าที่มีที่คั่น จะมีริบบิ้นสีแดง ที่ภาพหน้า", "ที่คั่นหน้า อยู่กับสมุด ของเราเท่านั้น ผู้เรียนในห้องสด ไม่เห็นที่คั่นหน้า ของครู"]}, {"id": 2, "date": "2026-11-14", "items": ["ค้นหาข้อความ ในทุกสมุดได้แล้ว พิมพ์คำในช่องค้นหาที่เมนู แอปจะค้นทั้งชื่อสมุด ข้อความที่พิมพ์ ลายมือที่แปลงเป็นตัวพิมพ์แล้ว หัวเรื่องของหน้า และข้อความในกล่องต่าง ๆ", "แตะผลการค้นหา เพื่อไปที่หน้านั้น กล่องที่มีคำนั้นจะเรืองแสงสักครู่ ให้เห็นตำแหน่ง", "พิมพ์คำไทย ติดกันหรือเว้นวรรค ก็ค้นเจอเหมือนกัน การค้นหาอ่านสมุดอย่างเดียว ไม่แก้ไขอะไรในสมุด"]}, {"id": 1, "date": "2026-11-13", "items": ["ดูเวอร์ชันของแอปได้ที่เมนู แท็บตั้งค่า หัวข้อเกี่ยวกับแอป", "เมื่อมีเวอร์ชันใหม่ระหว่างใช้งาน แอปจะไม่รีโหลดเอง รวมถึงจอผู้ชม เวอร์ชันใหม่จะมีผล เมื่อเปิดแอปครั้งถัดไป หรือเมื่อแตะแถบ มีเวอร์ชันใหม่", "หน้าที่เปิดค้างไว้ ใช้ส่วนต่าง ๆ ของแอป จากเวอร์ชันเดียวกับตัวเองเสมอ ไม่ปนกับเวอร์ชันใหม่", "เมื่อแอปทำงานผิดพลาด แอปจะส่งรายงาน ให้ผู้พัฒนา โดยส่งเฉพาะ ข้อความแจ้งข้อผิดพลาด ตำแหน่งในโค้ด รุ่นเครื่อง และเวอร์ชันของแอป ไม่ส่งเนื้อหาสมุด ชื่อ หรืออีเมล"]}];
 const TH_MON = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
 function thDay(iso) { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso || ''); return m ? (+m[3]) + ' ' + TH_MON[+m[2] - 1] + ' ' + (+m[1] + 543) : ''; }
 function renderVersion() { const el = $('#verNote'); if (el) el.innerHTML = 'เวอร์ชัน <span class="nowrap">' + esc(VERSION.startsWith('__') ? 'ในเครื่อง (ยังไม่ได้ประกอบ)' : VERSION) + '</span>'; }
