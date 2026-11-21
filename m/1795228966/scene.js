@@ -672,6 +672,7 @@ function buildScene(d, it, forExport) {
   /* a model of orbitals, surfaces or curves can sit on the paper without its box; the box comes back from its small handle */
   const frameSwap = (v) => { const before = clone(S.page.items || []), items = clone(before), x = items.find((t) => t.id === it.id); if (!x) return; x.spec.clean = v; if (v) x.spec.pen = x.spec.pen !== false; setItems(items, before); };
   if (!forExport && !sp.bare && sp.dim === 3 && sp.domain === 'math' && !sp.clean) { const sb0 = head.querySelector('.sbtns'); const nf = document.createElement('button'); nf.type = 'button'; nf.textContent = 'ไม่มีกรอบ'; nf.title = 'วางบนกระดาษแบบไม่มีกรอบ ลงสีแบบสีไม้ ยังหมุนได้'; nf.onclick = () => frameSwap(true); sb0.appendChild(nf); }
+  if (sp.mark === 'orb') d.classList.add('orbmark'); /* an orbital drawn with the pen tool: a square around its nucleus (task 9.9) */
   if (sp.clean && !forExport) {
     d.classList.add('clean');
     const hb = document.createElement('button'); hb.type = 'button'; hb.className = 'lifedot scnhandle cleandot no-ink'; hb.title = 'ปรับแบบจำลอง'; hb.setAttribute('aria-label', 'ปรับแบบจำลอง'); hb.setAttribute('aria-expanded', r.open ? 'true' : 'false');
@@ -1685,7 +1686,10 @@ function sc3Clean(sp, o) {
     const t = sp.t || {}; o.t = { min: scNum(t.min, 0, -1e6, 1e6), max: scNum(t.max, 6.2832, -1e6, 1e6), speed: scNum(t.speed, 1, 0, 1e4), loop: t.loop !== false };
     o.vars = {}; for (const [k, v] of Object.entries(sp.vars || {}).slice(0, 8)) if (/^[a-zA-Z]\w{0,9}$/.test(k) && !/^(t|x|y|z|e|pi)$/.test(k)) o.vars[k] = scNum(v, 1, -1e9, 1e9);
     const ex = (s) => scTxt(s, 140).replace(/[^0-9A-Za-z_+\-*/^().,\s<>=!]/g, '');
-    o.items = (Array.isArray(sp.items) ? sp.items : []).slice(0, 8).map((it, i) => ({ type: ['surface', 'curve', 'point', 'vector', 'tangent', 'orbital'].includes(it.type) ? it.type : 'surface', o: scTxt(it.o, 60).replace(/[^a-z0-9,]/g, ''), dir: it.dir ? v3(it.dir) : null, pick: /^[a-zA-Z]\w{0,9}$/.test(it.pick || '') ? it.pick : '', col2: scCol(it.col2, '#E39B2D'), color: scCol(it.color, SC_PAL[i % SC_PAL.length]), label: scTxt(it.label, 24), expr: ex(it.expr), x: ex(it.x), y: ex(it.y), z: ex(it.z), s0: ex(it.s0), s1: ex(it.s1), n: Math.round(scNum(it.n, 26, 6, 48)), range: Array.isArray(it.range) ? it.range.slice(0, 4).map((v) => scNum(v, 0, -1e6, 1e6)) : null, trace: !!it.trace }));
+    o.items = (Array.isArray(sp.items) ? sp.items : []).slice(0, 8).map((it, i) => Object.assign({ type: ['surface', 'curve', 'point', 'vector', 'tangent', 'orbital'].includes(it.type) ? it.type : 'surface', o: scTxt(it.o, 60).replace(/[^a-z0-9,]/g, ''), dir: it.dir ? v3(it.dir) : null, pick: /^[a-zA-Z]\w{0,9}$/.test(it.pick || '') ? it.pick : '', col2: scCol(it.col2, '#E39B2D'), color: scCol(it.color, SC_PAL[i % SC_PAL.length]), label: scTxt(it.label, 24), expr: ex(it.expr), x: ex(it.x), y: ex(it.y), z: ex(it.z), s0: ex(it.s0), s1: ex(it.s1), n: Math.round(scNum(it.n, 26, 6, 48)), range: Array.isArray(it.range) ? it.range.slice(0, 4).map((v) => scNum(v, 0, -1e6, 1e6)) : null, trace: !!it.trace },
+      /* an orbital drawn with the pen tool keeps the way it was drawn on the page: its own axes x y z, as three rows (task 9.9) */
+      Array.isArray(it.fr) && it.fr.length === 9 ? { fr: it.fr.map((v) => scNum(v, 0, -1, 1)) } : {}));
+    if (sp.mark === 'orb') o.mark = 'orb';
   }
   return o;
 }
@@ -1886,8 +1890,9 @@ function orb3Draw(g, it, sp, L, rt) {
   if (it.pick && sp.vars && list.length > 1) o = list[clamp(Math.round(sp.vars[it.pick]) - 1, 0, list.length - 1)];
   const many = sp.items.filter((x) => x.type === 'orbital').length, n1 = many > 2 ? 20 : 26, n2 = many > 2 ? 30 : 40, R = L * 0.85, dir = it.dir; /* fewer faces when several orbitals turn together (iPad) */
   /* the biggest value over all directions sets the size, so every orbital fills the same space */
+  const fr = it.fr, loc = fr ? (u) => [u[0] * fr[0] + u[1] * fr[1] + u[2] * fr[2], u[0] * fr[3] + u[1] * fr[4] + u[2] * fr[5], u[0] * fr[6] + u[1] * fr[7] + u[2] * fr[8]] : (u) => u;
   let mx = 0; const U = [];
-  for (let i = 0; i <= n1; i++) { U.push([]); const th = Math.PI * i / n1; for (let j = 0; j <= n2; j++) { const ph = 2 * Math.PI * j / n2, u = [Math.sin(th) * Math.cos(ph), Math.sin(th) * Math.sin(ph), Math.cos(th)], v = orbPsi(o, u, dir); U[i].push([u, v]); mx = Math.max(mx, v * v); } }
+  for (let i = 0; i <= n1; i++) { U.push([]); const th = Math.PI * i / n1; for (let j = 0; j <= n2; j++) { const ph = 2 * Math.PI * j / n2, u = [Math.sin(th) * Math.cos(ph), Math.sin(th) * Math.sin(ph), Math.cos(th)], v = orbPsi(o, loc(u), dir); U[i].push([u, v]); mx = Math.max(mx, v * v); } }
   const k = R / (mx || 1), cm = rt.cam || CAM0, V = [Math.sin(cm.yaw) * Math.cos(cm.pitch), -Math.cos(cm.yaw) * Math.cos(cm.pitch), Math.sin(cm.pitch)];
   const Lt = vUnit(vAdd(V, [0.25, -0.15, 0.45])), P = (e) => vMul(e[0], e[1] * e[1] * k);
   const hex = (c) => (/^#[0-9a-f]{6}$/i.test(c) ? c : '#2F4BB8'), c1 = hex(it.color), c2 = hex(it.col2);
@@ -1966,8 +1971,8 @@ function sc3Bind(cv, it, r) {
   const pts = new Map(); let pinch0 = 0, zoom0 = 1, lastTap = 0; cv.style.touchAction = 'none';
   const cam = () => r.cam || (r.cam = Object.assign({}, CAM0));
   const redraw = () => { if (!r.playing) scRender(findItem(it.id) || it, r); };
-  cv.addEventListener('pointerdown', (e) => { e.stopPropagation(); try { cv.setPointerCapture(e.pointerId); } catch (x) { /* fine */ } pts.set(e.pointerId, [e.clientX, e.clientY]); if (pts.size === 2) { const [a, b] = [...pts.values()]; pinch0 = Math.hypot(a[0] - b[0], a[1] - b[1]); zoom0 = cam().zoom; } const t = now(); if (pts.size === 1 && t - lastTap < 320) { r.cam = Object.assign({}, CAM0); redraw(); } lastTap = t; });
-  cv.addEventListener('pointermove', (e) => { if (!pts.has(e.pointerId)) return; e.stopPropagation(); const p0 = pts.get(e.pointerId), dx = e.clientX - p0[0], dy = e.clientY - p0[1]; pts.set(e.pointerId, [e.clientX, e.clientY]); const c = cam(); if (pts.size >= 2) { const [a, b] = [...pts.values()]; if (pinch0) c.zoom = clamp(zoom0 * Math.hypot(a[0] - b[0], a[1] - b[1]) / pinch0, 0.4, 4); } else { c.yaw -= dx * 0.009; c.pitch = clamp(c.pitch + dy * 0.009, -1.5707, 1.5707); } redraw(); });
+  cv.addEventListener('pointerdown', (e) => { e.stopPropagation(); try { cv.setPointerCapture(e.pointerId); } catch (x) { /* fine */ } if (e.isPrimary) for (const [k, v] of pts) if (v[2] === e.pointerType) pts.delete(k); /* a first finger: no other finger is still down (task 9.9) */ pts.set(e.pointerId, [e.clientX, e.clientY, e.pointerType]); if (pts.size === 2) { const [a, b] = [...pts.values()]; pinch0 = Math.hypot(a[0] - b[0], a[1] - b[1]); zoom0 = cam().zoom; } const t = now(); if (pts.size === 1 && t - lastTap < 320) { r.cam = Object.assign({}, CAM0); redraw(); } lastTap = t; });
+  cv.addEventListener('pointermove', (e) => { if (!pts.has(e.pointerId)) return; e.stopPropagation(); const p0 = pts.get(e.pointerId), dx = e.clientX - p0[0], dy = e.clientY - p0[1]; pts.set(e.pointerId, [e.clientX, e.clientY, e.pointerType]); const c = cam(); if (pts.size >= 2) { const [a, b] = [...pts.values()]; if (pinch0) c.zoom = clamp(zoom0 * Math.hypot(a[0] - b[0], a[1] - b[1]) / pinch0, 0.4, 4); } else { c.yaw -= dx * 0.009; c.pitch = clamp(c.pitch + dy * 0.009, -1.5707, 1.5707); } redraw(); });
   const up = (e) => { pts.delete(e.pointerId); if (pts.size < 2) pinch0 = 0; }; cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', up);
   cv.addEventListener('wheel', (e) => { e.preventDefault(); e.stopPropagation(); const c = cam(); c.zoom = clamp(c.zoom * Math.exp(-e.deltaY * 0.0015), 0.4, 4); redraw(); }, { passive: false });
 }
@@ -1997,6 +2002,29 @@ SCENE_TPL3.push(
   ['ไฮบริด sp³', 'สี่ออร์บิทัลชี้ไปมุมทรงสี่หน้า มุม 109.5 องศา เช่น CH4', { domain: 'math', dim: 3, title: 'ไฮบริด sp³', view: { L: 1.6 }, t: { min: 0, max: 1, speed: 0 }, items: SP3.map((d, i) => ({ type: 'orbital', o: 'sp3', dir: d, color: ['#2F4BB8', '#2E8B57', '#8E44AD', '#B23A3A'][i] })) }]
 );
 SCENE_TPL['3d'] = SCENE_TPL3;
+/* ----- an orbital drawn with the pen tool (chem.js marks os op od odz osp3) becomes a solid orbital on the paper that
+   turns under a finger (task 9.9). It starts the way it was dragged: the axis along the drag, its size the drag length,
+   the nucleus where the drag began, in the starting view (CAM0) that a double tap goes back to ----- */
+const ORB_MARK = { os: ['s', 'ออร์บิทัล s', 0.75], op: ['px', 'ออร์บิทัล p', 1], od: ['dx2y2', 'ออร์บิทัล d', 1], odz: ['dz2', 'ออร์บิทัล dz²', 1], osp3: ['sp3', 'ไฮบริด sp³', 1] };
+function orb3Mark(kind, a, b) {
+  const m = ORB_MARK[kind]; if (!m) return null;
+  const drag = Math.hypot(b[0] - a[0], b[1] - a[1]);
+  const snapT = (t) => { const s = Math.round(t / (Math.PI / 12)) * (Math.PI / 12); return Math.abs(s - t) < 0.09 ? s : t; };
+  const t = drag >= 8 ? snapT(Math.atan2(b[1] - a[1], b[0] - a[0])) : (kind === 'odz' ? -Math.PI / 2 : 0);
+  const L = drag >= 8 ? clamp(drag, 15, 260) : 45;
+  /* a direction on the screen (right, down) as a direction in the model, seen from the starting view */
+  const cy = Math.cos(CAM0.yaw), sy = Math.sin(CAM0.yaw), cp = Math.cos(CAM0.pitch), spp = Math.sin(CAM0.pitch);
+  const R = [cy, sy, 0], U = [-sy * spp, cy * spp, cp], d = (th) => vUnit(vSub(vMul(R, Math.cos(th)), vMul(U, Math.sin(th))));
+  let e1 = d(t), e2 = d(t + Math.PI / 2), e3 = vCross(e1, e2);
+  if (kind === 'odz') { e3 = d(t); e1 = d(t + Math.PI / 2); e2 = vCross(e3, e1); } /* dz² stands along the drag */
+  const fr = e1.concat(e2, e3).map((v) => Math.round(v * 1e4) / 1e4);
+  /* the model fills about a third of its square (cam3 with view L 1.6), so the lobe on the page is as long as the drag */
+  const side = Math.round(clamp(L * m[2] / 0.326, 110, 800));
+  const item = { type: 'orbital', o: m[0], color: '#2F4BB8', col2: '#E39B2D', fr };
+  if (kind === 'osp3') item.dir = [1, 0, 0];
+  const spec = { domain: 'math', dim: 3, title: m[1], view: { L: 1.6 }, t: { min: 0, max: 1, speed: 0 }, items: [item], clean: true, pen: true, mark: 'orb' };
+  return { spec, x: Math.round(a[0] - side / 2), y: Math.round(a[1] - side / 2), w: side };
+}
 
 
 /* ---------- living pictures, like the moving photographs of a wizarding newspaper: any drawing gets a behaviour that loops
