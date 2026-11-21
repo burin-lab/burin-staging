@@ -388,6 +388,7 @@ body.tv .toast { bottom: 112px; }
 .selbar .count { display: none; }
 
 .toast { position: fixed; left: 50%; bottom: max(20px, env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); z-index: 60; padding: 10px 16px; border-radius: 12px; background: var(--chrome); color: var(--chrome-fg); font-size: 14px; box-shadow: var(--shadow); max-width: calc(100% - 40px); text-align: center; }
+.chemno { position: fixed; z-index: 61; left: 50%; bottom: max(20px, env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); min-height: 44px; padding: 0 16px; border-radius: 22px; border: 1px solid var(--line, rgba(0,0,0,.15)); background: var(--chrome); color: var(--chrome-fg); font: inherit; font-size: 14px; box-shadow: var(--shadow); white-space: nowrap; }
 .loading { position: absolute; inset: 0; z-index: 8; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; background: var(--desk); color: var(--muted); }
 .loading b { color: var(--fg); font-size: 18px; }
 
@@ -6124,7 +6125,8 @@ function beginTool(pt, e) {
   } else if (S.tool === 'shape') {
     if (S.sel && nearHandle(S.sel.box, x, y) >= 0) { startScale(pt, nearHandle(S.sel.box, x, y)); return; }
     if (S.sel && inBox(S.sel.box, x, y)) { pt.mode = 'move'; pt.last = [x, y]; pt.dx = 0; pt.dy = 0; return; }
-    const hit = strokeAt(x, y);
+    S.shapePtr = pt.type;
+    const hit = chemDrawsHere(S.shapeKind, [x, y]) ? null : strokeAt(x, y); /* a bond started on an atom joins it instead of picking it up (task 8.18) */
     if (hit) { selectStrokes(hit); pt.mode = 'move'; pt.last = [x, y]; pt.dx = 0; pt.dy = 0; return; }
     if (S.sel) clearSel();
     pt.mode = 'shape'; pt.a = [x, y]; pt.b = [x, y];
@@ -6851,6 +6853,7 @@ function previewShape(pt) {
   c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, cLive.width, cLive.height);
   liveXf(c);
   for (const s of shapeStrokeLists(S.shapeKind, pt.a, pt.b)) drawStroke(c, s);
+  chemShowHit(c);
   emitInk(shapeStrokeLists(S.shapeKind, pt.a, pt.b));
 }
 /* an orbital drawn with the pen tool becomes a solid orbital that turns (task 9.9); "orb3" in flags.json keeps the flat drawing */
@@ -6883,9 +6886,11 @@ function commitShape(pt) {
   /* the strokes of one shape (a vector and its arrowhead, a triangle and its angle mark) belong together */
   const g = 'g' + uid();
   for (const s of list) { s.g = g; S.mine.push(s); }
+  const joined = isChemMark(S.shapeKind) ? chemJoin(list) : null; /* what it joined moves with it as one structure (task 8.18) */
   pushUndo({ t: 'layers', before, after: { [DEV]: clone(S.mine) } });
   saveMine(); emitInk(null);
   geoSegCache = null;
+  if (joined) chemUndoChip(pt, before, list);
   /* a new shape stays selected, so it can be moved, resized or deleted straight away; a geometry mark does not, so the next one can follow at once */
   if (!isGeoMark(S.shapeKind) && !isChemMark(S.shapeKind) && !isPedMark(S.shapeKind)) selectStrokes(list.map((st) => ({ layer: DEV, id: st.id })));
 }
@@ -11839,25 +11844,113 @@ CHEM_MARKS.push(
 const isChemMark = (k) => k !== '-' && CHEM_MARKS.some((m) => m[0] === k);
 const CHEM_HINT = { os: 'แตะที่นิวเคลียส ลากเพื่อกำหนดขนาด', op: 'ลากจากนิวเคลียสไปตามแกนของออร์บิทัล', od: 'ลากจากนิวเคลียสไปตามแนวกลีบหนึ่ง', odz: 'ลากจากนิวเคลียสไปตามแกน z', osp3: 'ลากจากนิวเคลียสไปทางกลีบใหญ่', obox: 'ลากไปทางขวาเพื่อกำหนดจำนวนกล่อง', oup: 'แตะในกล่อง ลูกศรจะไปอยู่ครึ่งซ้าย', odn: 'แตะในกล่อง ลูกศรจะไปอยู่ครึ่งขวา', rfwd: 'ลากจากสารตั้งต้นไปผลิตภัณฑ์', req: 'ลากจากซ้ายไปขวา', rres: 'ลากระหว่างโครงสร้างสองแบบ', rheat: 'ลากจากสารตั้งต้นไปผลิตภัณฑ์', rretro: 'ลากจากเป้าหมายไปสารตั้งต้น', eexo: 'ลากเป็นกรอบเพื่อวางกราฟ', eendo: 'ลากเป็นกรอบเพื่อวางกราฟ', e2step: 'ลากเป็นกรอบเพื่อวางกราฟ', bond1: 'ลากเพื่อวาดพันธะ แตะปลายพันธะเดิมเพื่อต่อเป็นโซ่', bond2: 'ลากเพื่อวาดพันธะคู่ แตะปลายพันธะเดิมเพื่อต่อ', bond3: 'ลากเพื่อวาดพันธะสาม แตะปลายพันธะเดิมเพื่อต่อ', wedge: 'ลากจากอะตอมที่อยู่หน้า', hash: 'ลากจากอะตอมที่อยู่หน้า', benz: 'แตะเพื่อวางวง แตะที่ปลายพันธะเพื่อต่อวง ลากเพื่อหมุนหรือย่อขยาย', lp: 'แตะข้างอะตอม ลากเพื่อหันทิศ', curly: 'ลากจากคู่อิเล็กตรอนไปยังที่ที่มันไป', hook: 'ลากจากอิเล็กตรอนเดี่ยวไปยังที่ที่มันไป' };
 
+/* ---------- what a drawn structure joins (task 8.18, "snap" in flags.json) ----------
+   A bond, a ring or a lone pair started or ended near an atom joins it: the point is caught within a distance measured
+   on the screen (bigger for a finger than for a pen, the same at every zoom), a bond meets a written or typed atom at
+   the edge of its letters, a bond leaving an atom takes 120, 109.5 or 180 degrees to the bonds already there when it
+   is close to one, and what joins becomes one structure that moves together. "ไม่ต่อกัน" right after puts it back as drawn */
+const CHEM = { off: false, hit: null, sig: '', ends: null, mid: null };
+const chemSnapOn = () => !CHEM.off && flagOn('snap');
+/* the catch distance on the page: about the width of a pen tip or a fingertip on the screen */
+function chemR() {
+  if (CHEM.raw) return 0; /* drawn again as dragged, after "ไม่ต่อกัน" */
+  if (!chemSnapOn()) return 14;
+  const px = S.shapePtr === 'touch' ? 30 : S.shapePtr === 'mouse' ? 16 : 22;
+  return clamp(px / ((S.base || 1) * (S.zoom || 1)), 6, CHEM_BOND * 0.6);
+}
 /* the ends of bonds already on the page (only the line along each bond, kept as cm 'b'), with the way each bond points */
 function chemEnds() {
+  const all = allStrokes();
+  let sig = all.length + ':'; for (const r of all) { const p = r.s.p; if (r.s.cm === 'b' && p) sig += (p[0] + p[1] * 3 + p[p.length - 2]) + ','; }
+  if (CHEM.ends && CHEM.sig === sig) return CHEM.ends;
   const out = [];
-  for (const r of allStrokes()) {
+  for (const r of all) {
     const st = r.s; if (!st || st.cm !== 'b' || !st.p || st.p.length < 6) continue;
     const n = st.p.length, a = [st.p[0] / 10, st.p[1] / 10], b = [st.p[n - 3] / 10, st.p[n - 2] / 10];
-    out.push({ p: a, from: b }, { p: b, from: a });
+    out.push({ p: a, from: b, r }, { p: b, from: a, r });
+  }
+  CHEM.sig = sig; CHEM.ends = out;
+  return out;
+}
+/* letters written or typed near a point: small pen writing that is not part of a drawn shape, gathered into one label
+   when the strokes touch (Cl, OH), and short typed labels; each is a circle round its letters */
+function chemAtoms(pt, R) {
+  const out = [], near = R + 70, small = [];
+  for (const r of allStrokes()) {
+    const s = r.s;
+    if (s.k !== 'p' || s.cm || s.gm || (s.g && !s.ca) || !s.p || s.p.length < 3) continue; /* a drawn shape is not a letter, unless it is a letter that joined a structure */
+    const b = sbox(s); if (b[2] - b[0] > 46 || b[3] - b[1] > 46) continue;
+    if (b[2] < pt[0] - near || b[0] > pt[0] + near || b[3] < pt[1] - near || b[1] > pt[1] + near) continue;
+    small.push({ b: b.slice(), refs: [r] });
+  }
+  /* strokes whose boxes touch belong to one label */
+  for (let i = 0; i < small.length; i++) for (let j = i + 1; j < small.length; j++) {
+    const A = small[i], B = small[j]; if (!A || !B) continue;
+    if (A.b[0] - 4 > B.b[2] || B.b[0] - 4 > A.b[2] || A.b[1] - 4 > B.b[3] || B.b[1] - 4 > A.b[3]) continue;
+    A.b = [Math.min(A.b[0], B.b[0]), Math.min(A.b[1], B.b[1]), Math.max(A.b[2], B.b[2]), Math.max(A.b[3], B.b[3])]; A.refs.push(...B.refs); small[j] = null; j = i;
+  }
+  for (const A of small) if (A && A.b[2] - A.b[0] <= 70 && A.b[3] - A.b[1] <= 50) out.push({ c: [(A.b[0] + A.b[2]) / 2, (A.b[1] + A.b[3]) / 2], r: Math.hypot(A.b[2] - A.b[0], A.b[3] - A.b[1]) / 2 + 3, refs: A.refs });
+  for (const it of (S.page && S.page.items) || []) {
+    if (it.type && it.type !== 'text') continue;
+    const t = String(it.md || '').replace(/\$|\\ce\{|\\mathrm\{|[{}_^\s]/g, '');
+    if (!/^[A-Za-z][A-Za-z0-9+\-−]{0,4}$/.test(t)) continue;
+    const b = tightItemBox(it); if (b[2] - b[0] > 90 || b[3] - b[1] > 60) continue;
+    const c = [(b[0] + b[2]) / 2, (b[1] + b[3]) / 2]; if (Math.abs(c[0] - pt[0]) > near || Math.abs(c[1] - pt[1]) > near) continue;
+    out.push({ c, r: Math.hypot(b[2] - b[0], b[3] - b[1]) / 2 * 0.8 + 2, refs: [], item: it.id });
   }
   return out;
 }
+/* the atom nearest a point within R: a bond end (a carbon of the skeleton) or a written atom, with every bond that already
+   meets there so a new one goes into the free side; p is the centre, r how far from it a bond stops */
 function chemNearEnd(pt, R) {
+  const ends = chemEnds(), on = chemSnapOn();
   let best = null, bd = R;
-  for (const e of chemEnds()) { const d = Math.hypot(e.p[0] - pt[0], e.p[1] - pt[1]); if (d < bd) { bd = d; best = e; } }
+  for (const e of ends) { const d = Math.hypot(e.p[0] - pt[0], e.p[1] - pt[1]); if (d < bd) { bd = d; best = { p: e.p.slice(), r: 0, from: e.from }; } }
+  if (on) for (const A of chemAtoms(pt, R)) {
+    const d = Math.max(0, Math.hypot(A.c[0] - pt[0], A.c[1] - pt[1]) - A.r);
+    if (d < bd || (best && !best.r && Math.hypot(best.p[0] - A.c[0], best.p[1] - A.c[1]) < A.r + 6 && d < R)) { bd = d; best = { p: A.c.slice(), r: A.r, refs: A.refs, item: A.item }; }
+  }
   if (!best) return null;
-  /* every bond already meeting at that point, so a new one goes into the free side */
-  const dirs = chemEnds().filter((e) => Math.hypot(e.p[0] - best.p[0], e.p[1] - best.p[1]) < 1.5).map((e) => Math.atan2(e.from[1] - e.p[1], e.from[0] - e.p[0]));
-  return { p: best.p.slice(), from: best.from, dirs };
+  const at = ends.filter((e) => Math.hypot(e.p[0] - best.p[0], e.p[1] - best.p[1]) < (best.r ? best.r + 6 : 1.5));
+  if (best.r && at.length === 1) best.from = at[0].from;
+  if (!best.from && at.length) best.from = at[0].from;
+  best.dirs = at.map((e) => Math.atan2(e.from[1] - e.p[1], e.from[0] - e.p[0]));
+  best.bonds = at.map((e) => e.r);
+  return best;
 }
 const chemSnapAng = (t) => Math.round(t / (Math.PI / 6)) * (Math.PI / 6);
+/* the way a bond leaves an atom: 120, 109.5 or 180 degrees from a bond already there when the drag is close to it,
+   otherwise the nearest step of 30 degrees as before */
+function chemBondAng(t, end) {
+  if (chemSnapOn() && end && end.dirs && end.dirs.length) {
+    let best = null, bd = 9 * Math.PI / 180;
+    for (const d of end.dirs) for (const deg of [120, -120, 109.5, -109.5, 180]) {
+      const c = d + deg * Math.PI / 180, e = Math.abs(Math.atan2(Math.sin(t - c), Math.cos(t - c)));
+      if (e < bd) { bd = e; best = c; }
+    }
+    if (best != null) { CHEM.hit = CHEM.hit || {}; CHEM.hit.ang = 1; return Math.atan2(Math.sin(best), Math.cos(best)); }
+  }
+  return chemSnapAng(t);
+}
+/* the bond nearest a point along its middle part (not near its ends), for a ring that shares it or an arrow that starts on it */
+function chemNearBond(pt, R) {
+  let best = null, bd = R;
+  for (const e of chemEnds()) {
+    const a = e.p, b = e.from, dx = b[0] - a[0], dy = b[1] - a[1], L2 = dx * dx + dy * dy; if (!L2) continue;
+    const t = ((pt[0] - a[0]) * dx + (pt[1] - a[1]) * dy) / L2; if (t < 0.2 || t > 0.8) continue;
+    const d = Math.hypot(pt[0] - a[0] - t * dx, pt[1] - a[1] - t * dy); if (d < bd) { bd = d; best = { a: a.slice(), b: b.slice(), r: e.r }; }
+  }
+  return best;
+}
+/* starting the structure tools on what is already there draws from it instead of picking it up (picking up the old
+   bond when a new one should join it was why bonds sometimes did not join); a bond tool on the middle of a bond still picks
+   the structure up to move it */
+function chemDrawsHere(kind, pt) {
+  if (!isChemMark(kind) || !chemSnapOn()) return false;
+  if (/^(curly|hook|lp|benz)$/.test(kind)) return true;
+  if (!/^(bond|wedge|hash)/.test(kind)) return false;
+  return !!chemNearEnd(pt, chemR());
+}
 /* where a bond starting at an atom goes when the user only taps: the zigzag of a carbon chain (120 degrees), or the
    free side when more bonds already meet there */
 function chemAutoDir(end) {
@@ -11873,19 +11966,66 @@ function chemAutoDir(end) {
   for (let i = 0; i < ds.length; i++) { const a = ds[i], b = i + 1 < ds.length ? ds[i + 1] : ds[0] + Math.PI * 2; if (b - a > gap) { gap = b - a; best = a + (b - a) / 2; } }
   return best;
 }
+/* while dragging, a ring round each atom the new bond will join, so it is plain before letting go */
+function chemShowHit(c) {
+  if (!chemSnapOn() || !CHEM.hit || !isChemMark(S.shapeKind)) return;
+  const sc = (S.base || 1) * (S.zoom || 1);
+  c.save(); c.strokeStyle = 'rgba(37, 99, 235, 0.55)'; c.lineWidth = 2 / sc;
+  for (const n of CHEM.hit.nodes || []) { c.beginPath(); c.arc(n.p[0], n.p[1], Math.max(n.r || 0, 7 / sc) + 3 / sc, 0, Math.PI * 2); c.stroke(); }
+  c.restore();
+}
+/* the strokes just drawn take the group of every structure they joined (and its written atoms), so the whole molecule is
+   picked up and moved as one; only this device's own strokes are regrouped. True when something was joined */
+function chemJoin(list) {
+  if (!chemSnapOn() || !CHEM.hit || !list.length) return false;
+  const g0 = list[0].g, merge = new Set(), mine = new Set(S.mine);
+  for (const n of CHEM.hit.nodes || []) for (const r of [].concat(n.bonds || [], n.refs || [])) {
+    if (!r || r.layer !== DEV || !mine.has(r.s)) continue;
+    if (r.s.g) merge.add(r.s.g); else { r.s.g = g0; r.s.ca = 1; }
+  }
+  merge.delete(g0);
+  if (merge.size) for (const s of S.mine) if (merge.has(s.g)) s.g = g0;
+  return !!((CHEM.hit.nodes && CHEM.hit.nodes.length) || CHEM.hit.pin);
+}
+/* "ไม่ต่อกัน" for a few seconds after something joined: puts it back as it was dragged, joined to nothing */
+function chemUndoChip(pt, before, list) {
+  let el = document.getElementById('chemNo');
+  if (!el) { el = document.createElement('button'); el.id = 'chemNo'; el.type = 'button'; el.className = 'chemno no-ink'; el.textContent = 'ไม่ต่อกัน'; document.body.appendChild(el); }
+  const kind = S.shapeKind, a = pt.a.slice(), b = pt.b.slice(), pid = S.pid, ids = list.map((s) => s.id);
+  /* where the toasts show, at the bottom middle, so it never covers the atom the next bond starts from */
+  el.hidden = false; const tt = document.getElementById('toast'); if (tt) tt.hidden = true;
+  clearTimeout(CHEM.chipT); CHEM.chipT = setTimeout(() => { el.hidden = true; }, 3500);
+  el.onpointerdown = (e) => e.stopPropagation();
+  el.onclick = (e) => {
+    e.stopPropagation(); el.hidden = true; clearTimeout(CHEM.chipT);
+    if (S.pid !== pid || !ids.every((id) => S.mine.some((s) => s.id === id))) return; /* already undone or changed */
+    CHEM.raw = true; let raw; try { raw = chemMarkLists(kind, a, b); } finally { CHEM.raw = false; CHEM.hit = null; }
+    const cur = clone(S.mine), g = 'g' + uid();
+    S.mine = clone(before[DEV] || []); for (const s of raw) { s.g = g; S.mine.push(s); }
+    pushUndo({ t: 'layers', before: { [DEV]: cur }, after: { [DEV]: clone(S.mine) } });
+    saveMine(); drawInk();
+  };
+}
 function chemMarkLists(kind, a, b) {
   const out = [], line = (p, q, extra) => out.push(Object.assign({ pts: shapePts({ type: 'line', a: p, b: q }, 55) }, extra || {}));
-  const drag = Math.hypot(b[0] - a[0], b[1] - a[1]), w = curW();
+  let drag = Math.hypot(b[0] - a[0], b[1] - a[1]); const w = curW();
   const mk = () => out.map((o) => Object.assign({ id: 's' + uid(), k: 'p', c: S.color, w: o.w || w, p: o.pts, cm: o.cm || 1 }));
+  CHEM.hit = null;
+  const SR = chemR(), hit = (n) => { if (n) { CHEM.hit = CHEM.hit || {}; (CHEM.hit.nodes = CHEM.hit.nodes || []).push(n); } return n; };
   if (/^(bond|wedge|hash)/.test(kind)) {
-    const st = chemNearEnd(a, 14), p0 = st ? st.p : a.slice();
-    let p1;
-    const endSnap = drag >= 8 ? chemNearEnd(b, 14) : null;
-    if (endSnap && Math.hypot(endSnap.p[0] - p0[0], endSnap.p[1] - p0[1]) > 10) p1 = endSnap.p; /* closing a ring onto an atom already there */
-    else {
-      const t = drag >= 8 ? chemSnapAng(Math.atan2(b[1] - p0[1], b[0] - p0[0])) : chemAutoDir(st);
-      let L = drag >= 8 ? Math.hypot(b[0] - p0[0], b[1] - p0[1]) : CHEM_BOND; if (Math.abs(L - CHEM_BOND) < CHEM_BOND * 0.35) L = CHEM_BOND;
-      p1 = [p0[0] + L * Math.cos(t), p0[1] + L * Math.sin(t)];
+    const st = hit(chemNearEnd(a, SR)), c0 = st ? st.p : a.slice();
+    let p0 = c0, p1;
+    const endSnap = drag >= 8 ? chemNearEnd(b, SR) : null;
+    if (endSnap && Math.hypot(endSnap.p[0] - c0[0], endSnap.p[1] - c0[1]) > 10) { /* closing a ring onto an atom already there */
+      hit(endSnap); const t = Math.atan2(endSnap.p[1] - c0[1], endSnap.p[0] - c0[0]);
+      p1 = [endSnap.p[0] - (endSnap.r || 0) * Math.cos(t), endSnap.p[1] - (endSnap.r || 0) * Math.sin(t)];
+      if (st && st.r) p0 = [c0[0] + st.r * Math.cos(t), c0[1] + st.r * Math.sin(t)];
+    } else {
+      const t = drag >= 8 ? chemBondAng(Math.atan2(b[1] - c0[1], b[0] - c0[0]), st) : chemAutoDir(st);
+      let L = drag >= 8 ? Math.hypot(b[0] - c0[0], b[1] - c0[1]) : CHEM_BOND; if (Math.abs(L - CHEM_BOND) < CHEM_BOND * 0.35) L = CHEM_BOND;
+      /* from a written atom the bond starts at the edge of its letters, and the next atom still sits one bond away */
+      if (st && st.r) { L = Math.max(L, st.r + 12); p0 = [c0[0] + st.r * Math.cos(t), c0[1] + st.r * Math.sin(t)]; }
+      p1 = [c0[0] + L * Math.cos(t), c0[1] + L * Math.sin(t)];
     }
     const dx = p1[0] - p0[0], dy = p1[1] - p0[1], L = Math.hypot(dx, dy) || 1, u = [dx / L, dy / L], nv = [-u[1], u[0]];
     if (kind === 'wedge') {
@@ -11908,22 +12048,48 @@ function chemMarkLists(kind, a, b) {
     return mk();
   }
   if (kind === 'benz') {
-    const st = chemNearEnd(a, 14); let c, rot, R = CHEM_BOND;
-    if (st && drag < 8) { /* the ring grows out of the atom at the end of a bond, along that bond */
-      const t = Math.atan2(st.p[1] - st.from[1], st.p[0] - st.from[0]); c = [st.p[0] + R * Math.cos(t), st.p[1] + R * Math.sin(t)]; rot = t + Math.PI;
+    const st = hit(chemNearEnd(a, SR)); let c, rot, R = CHEM_BOND;
+    const side = drag < 8 && chemSnapOn() && !st ? chemNearBond(a, SR) : null;
+    if (side) { /* tapped on the middle of a bond: the new ring shares that bond, on the side tapped */
+      hit({ p: side.a, bonds: [side.r] });
+      const m = [(side.a[0] + side.b[0]) / 2, (side.a[1] + side.b[1]) / 2], L = Math.hypot(side.b[0] - side.a[0], side.b[1] - side.a[1]);
+      let nv = [-(side.b[1] - side.a[1]) / L, (side.b[0] - side.a[0]) / L]; if ((a[0] - m[0]) * nv[0] + (a[1] - m[1]) * nv[1] < 0) nv = [-nv[0], -nv[1]];
+      R = L; c = [m[0] + nv[0] * L * Math.sqrt(3) / 2, m[1] + nv[1] * L * Math.sqrt(3) / 2]; rot = Math.atan2(side.a[1] - c[1], side.a[0] - c[0]);
+      const tb = Math.atan2(side.b[1] - c[1], side.b[0] - c[0]), dd = Math.atan2(Math.sin(tb - rot - Math.PI / 3), Math.cos(tb - rot - Math.PI / 3)); if (Math.abs(dd) > 0.05) rot = tb;
+    } else if (st && drag < 8) { /* the ring grows out of the atom at the end of a bond, along that bond (or into the free side) */
+      const t = !chemSnapOn() || st.dirs.length === 1 ? Math.atan2(st.p[1] - st.from[1], st.p[0] - st.from[0]) : st.dirs.length ? chemAutoDir(st) : -Math.PI / 2;
+      const o = [st.p[0] + (st.r || 0) * Math.cos(t), st.p[1] + (st.r || 0) * Math.sin(t)];
+      c = [o[0] + R * Math.cos(t), o[1] + R * Math.sin(t)]; rot = t + Math.PI;
     } else { c = a.slice(); rot = drag >= 8 ? chemSnapAng(Math.atan2(b[1] - a[1], b[0] - a[0])) : -Math.PI / 2; if (drag >= 8) R = clamp(drag, 20, 160); if (Math.abs(R - CHEM_BOND) < CHEM_BOND * 0.35) R = CHEM_BOND; }
     const v = []; for (let i = 0; i < 6; i++) { const t = rot + i * Math.PI / 3; v.push([c[0] + R * Math.cos(t), c[1] + R * Math.sin(t)]); }
-    for (let i = 0; i < 6; i++) line(v[i], v[(i + 1) % 6], { cm: 'b' }); /* each side is a bond, so chains can grow from any corner */
+    /* each side is a bond, so chains can grow from any corner; a side that is already a bond is not drawn twice */
+    const have = chemSnapOn() ? chemEnds() : [], twice = (p, q) => have.some((e) => Math.hypot(e.p[0] - p[0], e.p[1] - p[1]) < 2 && Math.hypot(e.from[0] - q[0], e.from[1] - q[1]) < 2);
+    for (let i = 0; i < 6; i++) { const p = v[i], q = v[(i + 1) % 6]; if (!twice(p, q)) line(p, q, { cm: 'b' }); }
     out.push({ pts: shapePts({ type: 'ellipse', cx: c[0], cy: c[1], rx: R * 0.58, ry: R * 0.58 }, 55) });
     return mk();
   }
   if (kind === 'lp') {
-    const t = drag >= 8 ? Math.atan2(b[1] - a[1], b[0] - a[0]) : 0, nv = [-Math.sin(t), Math.cos(t)], g = clamp(w * 1.4 + 2.5, 3.5, 6);
+    /* tapped beside a written atom: the pair sits just outside its letters, facing away from it (or into the free side) */
+    const at = chemSnapOn() ? chemNearEnd(a, SR) : null; let t0 = null;
+    if (at && at.r) {
+      hit(at); const d = Math.hypot(a[0] - at.p[0], a[1] - at.p[1]);
+      if (drag < 8) { t0 = d > at.r * 0.4 ? Math.atan2(a[1] - at.p[1], a[0] - at.p[0]) : chemAutoDir(at); a = [at.p[0] + (at.r + 4) * Math.cos(t0), at.p[1] + (at.r + 4) * Math.sin(t0)]; }
+    }
+    const t = t0 != null ? t0 : drag >= 8 ? Math.atan2(b[1] - a[1], b[0] - a[0]) : 0, nv = [-Math.sin(t), Math.cos(t)], g = clamp(w * 1.4 + 2.5, 3.5, 6);
     for (const s of [-1, 1]) { const q = [a[0] + nv[0] * g * s, a[1] + nv[1] * g * s]; out.push({ pts: shapePts({ type: 'ellipse', cx: q[0], cy: q[1], rx: 0.6, ry: 0.6 }, 55), w: clamp(w * 1.6, 3, 6) }); }
     return mk();
   }
   if (kind === 'curly' || kind === 'hook') {
     if (drag < 12) return [];
+    if (chemSnapOn()) {
+      /* the arrow starts on a bond or a written atom and ends on one when it is let go near it; a bare corner of the skeleton
+         does not pull it (that bent short arrows out of shape), and an arrow the pull would shorten a lot stays as dragged */
+      const pin = (q, o) => { const n = chemNearEnd(q, SR); if (n && n.r) { const t = Math.atan2(o[1] - n.p[1], o[0] - n.p[0]); return [n.p[0] + (n.r + 2) * Math.cos(t), n.p[1] + (n.r + 2) * Math.sin(t)]; }
+        const m = chemNearBond(q, SR); return m ? [(m.a[0] + m.b[0]) / 2, (m.a[1] + m.b[1]) / 2] : q; };
+      const a2 = pin(a, b), b2 = pin(b, a), d2 = Math.hypot(b2[0] - a2[0], b2[1] - a2[1]);
+      if ((a2 !== a || b2 !== b) && d2 >= 12 && d2 >= drag * 0.6) { CHEM.hit = { pin: 1 }; a = a2; b = b2; }
+      drag = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    }
     /* a smooth arc that bows to the left of the drag, with its head along the arc at the end */
     const m = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], nv = [-(b[1] - a[1]) / drag, (b[0] - a[0]) / drag], bow = drag * 0.38;
     const c = [m[0] + nv[0] * bow, m[1] + nv[1] * bow], pts = [];
@@ -22035,7 +22201,7 @@ async function deckExportPptx() {
 }
 
 /* ---------- new version notice (own website only) ---------- */
-const BUILD = '1795215207';
+const BUILD = '1795219289';
 let updShown = false;
 async function checkUpdate() {
   if (BUILD.startsWith('__') || (window.claude && window.claude.use) || updShown || !navigator.onLine) return;
@@ -22061,8 +22227,8 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) chec
 setInterval(checkUpdate, 30 * 60 * 1000); setTimeout(checkUpdate, 8000);
 
 /* ---------- version and what is new ---------- */
-const VERSION = '20261120-aad8df03';
-const NEWS = [{"id": 22, "date": "2026-11-20", "items": ["ออร์บิทัล s p d และ sp³ ที่วาดด้วยเครื่องมือรูปทรง เป็นสามมิติแล้ว ลากเพื่อหมุนดูได้ทุกทิศ ใช้สองนิ้วย่อขยาย แตะสองครั้งกลับมุมเดิม", "รูปเวกเตอร์สามมิติ ย่อขยายด้วยสองนิ้วได้ และแตะสองครั้งกลับมุมเดิม"]}, {"id": 21, "date": "2026-11-20", "items": ["แถบคำสั่งหลังเลือกด้วยบ่วงบาศก์ ปุ่ม ขยับได้ เป็นปุ่มแรกทุกครั้งที่ใช้ได้ ตามด้วยคำสั่งที่ใช้บ่อยกับสิ่งที่เลือกสามปุ่มข้างหน้า ที่เหลืออยู่ในกลุ่ม แปลง เห็นภาพ ตรวจและแก้ จัดวาง แตะกลุ่มแล้วคำสั่งขึ้นในแถบเดิม บน iPad แถบเหลือแถวเดียว บนมือถือสองแถว"]}, {"id": 20, "date": "2026-11-20", "items": ["ต่อสาย จอสะอาด แบบ ทั้งหน้า เห็นหน้าครบถึงขอบล่าง พอดีความสูงจอ และพื้นรอบหน้าเป็นสีดำ โปรเจกเตอร์จึงฉายแสงเฉพาะหน้ากระดาษ"]}, {"id": 19, "date": "2026-11-20", "items": ["ขยายหน้าจออยู่ มีปุ่ม หน้าใหม่ ข้างเลขหน้าที่มุมล่าง แตะครั้งเดียวได้หน้าใหม่ต่อจากหน้านี้ ขยายเท่าเดิม พร้อมเขียนที่มุมบนซ้าย"]}, {"id": 18, "date": "2026-11-19", "items": ["เขียนตอนขยายหน้าจอ เส้นไม่หดตรงมุมเมื่อยกปากกาแล้ว ตัวอักษรอยู่ตรงที่เขียนเหมือนตอนกำลังเขียน", "ขยายหน้าจอแล้วพักปากกาครู่หนึ่งขณะเขียน ตัวอักษรไม่ถูกเปลี่ยนเป็นรูปทรงอีก วาดค้างไว้ให้เป็นรูปทรงยังใช้ได้กับรูปที่ใหญ่กว่าลายมือบนหน้า", "ห้องเรียนสดที่ครูเปิด PDF แอปของนักเรียนไม่ปิดเองเพราะหน่วยความจำเต็มอีก"]}, {"id": 17, "date": "2026-11-18", "items": ["มอบหมายการบ้าน กดปุ่มแล้วขึ้น กำลังมอบหมาย และ มอบหมายแล้ว กดซ้ำไม่ได้ จึงไม่มีการบ้านซ้ำ ลิงก์กับ QR เลื่อนขึ้นมาให้เห็นทันที"]}, {"id": 16, "date": "2026-11-18", "items": ["ตั้งค่าคลาวด์ใหม่ ที่เมนู แท็บ บัญชี ซิงก์ และ AI ใช้คลาวด์ BURIN ได้ทันทีโดยไม่ต้องตั้งค่า", "ใช้ Supabase ของตัวเองได้ในหัวข้อ ขั้นสูง และสลับกลับมาคลาวด์ BURIN ได้ทุกเมื่อ สมุดทั้งสองที่ไม่หาย"]}, {"id": 15, "date": "2026-11-18", "items": ["ลืมรหัสผ่าน ตั้งรหัสใหม่ได้จากหน้าเข้าสู่ระบบ กด ลืมรหัสผ่าน แล้วทำตามอีเมลที่ได้รับ", "สมัครบัญชีใหม่แล้วยืนยันอีเมลได้ในแอป และกดส่งอีเมลยืนยันอีกครั้งได้"]}, {"id": 14, "date": "2026-11-18", "items": ["ห้องเรียนสดที่ลืมปิดปิดเอง เมื่อกลับมาที่แอปหลังห่างไปเกิน 1 ชั่วโมง ห้องไม่เปิดต่อเองและไม่ส่งสิ่งที่เขียนให้ผู้เรียน แตะ เปิดห้องเดิมอีกครั้ง ได้รหัสเดิม", "ห้องที่ไม่มีผู้เรียนและครูไม่ได้ใช้แอปนาน 30 นาทีปิดเอง มีแถบบอกก่อน 1 นาที ครูที่กำลังสอนห้องไม่ปิด แม้ผู้เรียนล็อกจอ", "ปิดห้องแล้วผู้เรียนยังส่งการบ้านได้ถึงเวลาที่กำหนด และเห็นปุ่มไปที่งานของฉัน"]}, {"id": 13, "date": "2026-11-17", "items": ["ข้อความที่พิมพ์ไม่ต้องรอ AI สมการที่พิมพ์ เช่น y = 2x + 1 สร้างกราฟได้ทันที ตารางที่พิมพ์เป็นข้อมูลได้ทันที และตรวจหน่วยของบรรทัดคำนวณที่พิมพ์ได้ทันที ใช้ได้แม้ไม่มีอินเทอร์เน็ต", "วาดใหม่ จัดเส้นตรง สี่เหลี่ยม วงกลม ในภาพร่างให้เรียบร้อยทันทีโดยไม่ใช้ AI ตัวอักษรยังเป็นลายมือเดิม ถ้าต้องการให้แก้ตามเนื้อหา กด ให้ AI วาดใหม่ตามเนื้อหา", "หลังทำแบบฝึก บทที่ยังอ่อนบอกชนิดข้อที่พลาด และความเข้าใจที่ควรแก้จากตัวเลือกที่ตอบ"]}, {"id": 12, "date": "2026-11-17", "items": ["ลายมือที่ AI อ่านแล้วไม่ต้องอ่านซ้ำ แปลงเป็นตัวพิมพ์ แก้สมการ สร้างรูป ตรวจหน่วย และสร้างโจทย์ จากลายมือเดิมใช้คำที่อ่านไว้ เร็วขึ้นและไม่ส่งภาพซ้ำ ถ้าอ่านผิด สั่งงานเดิมอีกครั้ง AI จะอ่านใหม่", "ค้นหาในทุกสมุดพบลายมือที่ AI เคยอ่านแล้วด้วย"]}, {"id": 11, "date": "2026-11-17", "items": ["ทดลองวางวัตถุสามมิติบนโต๊ะจริง (AR) ได้ที่ ปุ่ม สมุดทั้งหมด แท็บ ภาษา การเขียน และจอ หัวข้อ ลองดูในห้องจริง ใช้ได้บน iPad และ iPhone แอปสร้างไฟล์ในเครื่องเอง ไม่ใช้ AI"]}, {"id": 10, "date": "2026-11-17", "items": ["คอมที่ต่อจอที่สอง เลือก จอที่สอง ผู้ชมไม่เห็นแถบ ในเมนู นำเสนอ ครูใช้ได้ทุกคำสั่ง จอใหญ่เห็นแต่หน้ากระดาษ ไม่ต้องใช้อินเทอร์เน็ต", "ระหว่างเปิดจอผู้ชม ครูมีแถบเล็ก จอผู้ชม เลือกให้จอใหญ่เห็นทั้งหน้า พักจอ หรือปิด (ปุ่ม B บนคีย์บอร์ดหรือรีโมตก็พักจอได้)", "ต่อ iPad ออกทีวีด้วยสาย ใช้ ต่อสาย จอสะอาด ในเมนู นำเสนอ (ปุ่ม สอนและนำเสนอ)", "เริ่มแล้วจอเห็นแต่หน้ากระดาษ ไม่มีแถบหรือปุ่มใดขึ้นเลย ทั้งบน iPad และทีวี", "ก่อนเริ่ม เลือกปากกาให้แต่ละขอบจอ (สี ไฮไลต์ ยางลบ หรือเลเซอร์) ระหว่างนำเสนอ แตะขอบจอด้วยนิ้วเพื่อหยิบปากกาของขอบนั้น", "เลือกได้ว่าให้เห็นทั้งหน้า และเริ่มด้วยม่านบังครึ่งล่างที่ใช้นิ้วลากลงเพื่อเปิดทีละบรรทัด", "แตะค้างสามนิ้ว 1 วินาที เพื่อออก ใช้รีโมตนำเสนอเปลี่ยนหน้า ปุ่ม B พักจอ ปุ่ม Esc ออก", "เมนู นำเสนอ เหลือสามข้อ จอแสดงผลแบบนักเรียนบนอีกเครื่องและบนจอที่สองรวมเป็นข้อเดียว"]}, {"id": 9, "date": "2026-11-17", "items": ["แถบบนเหลือปุ่มน้อยลง ปุ่มที่ใช้นาน ๆ ครั้ง รวมอยู่ในสองกลุ่ม", "ปุ่ม ต่อยอดจากหน้า มี แปลงเป็นตัวพิมพ์ สร้างโจทย์ และ ชุดโจทย์", "ปุ่ม สอนและนำเสนอ มี ห้องสด นำเสนอ และ ห้องเรียนและโจทย์ (ฝั่งนักเรียนชื่อ ห้องเรียน มี สแกน QR และ เข้าห้องเรียน ด้วย)", "เลือกด้วยบ่วงแล้ว แถบเหนือส่วนที่เลือก แสดงคำสั่งที่ใช้บ่อยก่อน คำสั่งอื่นอยู่ที่ปุ่ม เพิ่มเติม", "หาคำสั่งไม่เจอ พิมพ์ชื่อในช่องค้นหาที่เมนู เช่น PDF หรือ สามมิติ แล้วแตะคำสั่งที่ขึ้นมา"]}, {"id": 8, "date": "2026-11-16", "items": ["สร้างโจทย์ด้วย AI จากกี่หน้าก็ได้ ทั้งเล่ม ตามบท หรือเป็นช่วงหน้า", "อยู่ที่ปุ่ม สร้างโจทย์ด้วย AI หัวข้อ หน้าที่ใช้สร้างโจทย์ แตะ ทั้งเล่ม หรือแตะชื่อบท หรือใส่ช่วงหน้า แล้วกด เลือกช่วงนี้", "หน้าที่ AI อ่านแล้ว เก็บไว้ในเครื่องนี้ ครั้งต่อไป ไม่ต้องอ่านซ้ำ จึงเร็วขึ้น และประหยัดค่า AI"]}, {"id": 7, "date": "2026-11-16", "items": ["ลบผิด หรือเขียนทับผิด ดึงหน้า เมื่อไม่กี่นาทีก่อน หรือเมื่อวาน กลับมาได้", "อยู่ที่ ลิ้นชักหน้า แตะแถบ หน้านี้ ด้านล่าง แล้วกดปุ่ม รุ่นก่อนของหน้านี้ เลือกรุ่น ดูภาพหน้าก่อน แล้วกด คืนหน้าเป็นรุ่นนี้", "หน้าก่อนคืน ถูกเก็บไว้ด้วย จึงย้อนกลับได้ แอปเก็บรุ่นก่อน ไว้ในเครื่องนี้ 30 วัน"]}, {"id": 6, "date": "2026-11-16", "items": ["บัญชีคลาวด์ ส่งออกข้อมูลทั้งบัญชี เป็นไฟล์เดียวได้ ทั้งสมุด หน้า หมึก รูป วิดีโอ เลคเชอร์ที่แชร์ การบ้าน และงานที่นักเรียนส่ง", "อยู่ที่ เมนู แท็บตั้งค่า หัวข้อ ข้อมูลทั้งบัญชี กดปุ่ม ส่งออกทั้งบัญชี", "นำเข้าไฟล์นี้ ในบัญชีอื่น หรือเครื่องใหม่ได้ การนำเข้า เพิ่มเฉพาะส่วนที่ยังไม่มี ไม่ทับ และไม่ลบ ของที่มีอยู่"]}, {"id": 5, "date": "2026-11-15", "items": ["ลบสมุด หรือลบหน้าแล้ว ยังกู้คืนได้ ภายใน 30 วัน สิ่งที่ลบ ไปอยู่ในถังขยะ ก่อนถูกลบจริง", "เปิดถังขยะ ได้ที่ เมนู สมุดทั้งหมด ปุ่มถังขยะ ใต้รายการสมุด กดกู้คืน แล้วสมุดกลับไป ที่เดิม หน้ากลับไป ตำแหน่งเดิม ในสมุด", "ลบถาวร ทีละรายการ หรือลบทั้งหมด ในถังขยะได้ ครบ 30 วัน แล้วแอปลบให้เอง"]}, {"id": 4, "date": "2026-11-15", "items": ["สำรองสมุด ทั้งหมดเป็นไฟล์เดียว ได้ที่ เมนู แท็บตั้งค่า หัวข้อ สมุดในเครื่องนี้ ไฟล์เก็บสมุดทุกเล่ม รูป และวิดีโอ ในเครื่องนี้", "นำสมุดคืน จากไฟล์สำรอง ได้ที่เดียวกัน การนำคืน เพิ่มเฉพาะส่วน ที่ยังไม่มีในเครื่อง ไม่ทับ และไม่ลบ ของที่มีอยู่", "แอปขอให้เบราว์เซอร์ เก็บสมุดในเครื่อง ไว้ถาวร และเตือนให้สำรองสมุด ที่หน้ารายการสมุด เมื่อสมุดเปลี่ยนไป ตั้งแต่สำรองครั้งล่าสุด", "บน iPad และ iPhone ใน Safari แอปชวนให้ เพิ่มลงหน้าจอโฮม เพื่อไม่ให้ Safari ลบสมุด ที่ไม่ได้เปิดนาน ให้สำรองสมุดก่อน แล้วนำคืน ในแอปบนหน้าจอโฮม"]}, {"id": 3, "date": "2026-11-14", "items": ["สารบัญ ของสมุด แตะปุ่มหน้าในสมุด ที่มุมซ้ายบน แล้วเลือก สารบัญ จะเห็นหัวเรื่อง ของทุกหน้า แตะหัวเรื่อง เพื่อไปที่หน้านั้น ได้ทันที", "หัวเรื่อง มาจากข้อความที่พิมพ์ไว้ บนสุดของหน้า หรือบรรทัด ที่ขึ้นต้นด้วย ## ลายมือที่ยังไม่ได้แปลง เป็นตัวพิมพ์ ไม่ขึ้นในสารบัญ", "ที่คั่นหน้า แตะ ปักที่คั่นหน้านี้ ในหน้าสารบัญ แล้วตั้งชื่อเองได้ หน้าที่มีที่คั่น จะมีริบบิ้นสีแดง ที่ภาพหน้า", "ที่คั่นหน้า อยู่กับสมุด ของเราเท่านั้น ผู้เรียนในห้องสด ไม่เห็นที่คั่นหน้า ของครู"]}, {"id": 2, "date": "2026-11-14", "items": ["ค้นหาข้อความ ในทุกสมุดได้แล้ว พิมพ์คำในช่องค้นหาที่เมนู แอปจะค้นทั้งชื่อสมุด ข้อความที่พิมพ์ ลายมือที่แปลงเป็นตัวพิมพ์แล้ว หัวเรื่องของหน้า และข้อความในกล่องต่าง ๆ", "แตะผลการค้นหา เพื่อไปที่หน้านั้น กล่องที่มีคำนั้นจะเรืองแสงสักครู่ ให้เห็นตำแหน่ง", "พิมพ์คำไทย ติดกันหรือเว้นวรรค ก็ค้นเจอเหมือนกัน การค้นหาอ่านสมุดอย่างเดียว ไม่แก้ไขอะไรในสมุด"]}, {"id": 1, "date": "2026-11-13", "items": ["ดูเวอร์ชันของแอปได้ที่เมนู แท็บตั้งค่า หัวข้อเกี่ยวกับแอป", "เมื่อมีเวอร์ชันใหม่ระหว่างใช้งาน แอปจะไม่รีโหลดเอง รวมถึงจอผู้ชม เวอร์ชันใหม่จะมีผล เมื่อเปิดแอปครั้งถัดไป หรือเมื่อแตะแถบ มีเวอร์ชันใหม่", "หน้าที่เปิดค้างไว้ ใช้ส่วนต่าง ๆ ของแอป จากเวอร์ชันเดียวกับตัวเองเสมอ ไม่ปนกับเวอร์ชันใหม่", "เมื่อแอปทำงานผิดพลาด แอปจะส่งรายงาน ให้ผู้พัฒนา โดยส่งเฉพาะ ข้อความแจ้งข้อผิดพลาด ตำแหน่งในโค้ด รุ่นเครื่อง และเวอร์ชันของแอป ไม่ส่งเนื้อหาสมุด ชื่อ หรืออีเมล"]}];
+const VERSION = '20261121-d10a49dd';
+const NEWS = [{"id": 23, "date": "2026-11-20", "items": ["วาดโครงสร้างเคมีแล้วต่อกันเอง แตะหรือลากจากปลายพันธะเดิมได้พันธะใหม่ที่ต่อกัน ไม่หยิบพันธะเดิมไปแล้ว พันธะที่เริ่มหรือจบใกล้อักษรอะตอมที่เขียนหรือพิมพ์ ต่อที่ขอบอักษรนั้น มุมพันธะเข้า 109.5 120 หรือ 180 องศาเมื่อลากใกล้ แตะกลางด้านของวงได้วงที่เชื่อมกัน ทั้งโมเลกุลย้ายไปด้วยกัน กด ไม่ต่อกัน ที่ขึ้นด้านล่างถ้าไม่ต้องการให้ต่อ"]}, {"id": 22, "date": "2026-11-20", "items": ["ออร์บิทัล s p d และ sp³ ที่วาดด้วยเครื่องมือรูปทรง เป็นสามมิติแล้ว ลากเพื่อหมุนดูได้ทุกทิศ ใช้สองนิ้วย่อขยาย แตะสองครั้งกลับมุมเดิม", "รูปเวกเตอร์สามมิติ ย่อขยายด้วยสองนิ้วได้ และแตะสองครั้งกลับมุมเดิม"]}, {"id": 21, "date": "2026-11-20", "items": ["แถบคำสั่งหลังเลือกด้วยบ่วงบาศก์ ปุ่ม ขยับได้ เป็นปุ่มแรกทุกครั้งที่ใช้ได้ ตามด้วยคำสั่งที่ใช้บ่อยกับสิ่งที่เลือกสามปุ่มข้างหน้า ที่เหลืออยู่ในกลุ่ม แปลง เห็นภาพ ตรวจและแก้ จัดวาง แตะกลุ่มแล้วคำสั่งขึ้นในแถบเดิม บน iPad แถบเหลือแถวเดียว บนมือถือสองแถว"]}, {"id": 20, "date": "2026-11-20", "items": ["ต่อสาย จอสะอาด แบบ ทั้งหน้า เห็นหน้าครบถึงขอบล่าง พอดีความสูงจอ และพื้นรอบหน้าเป็นสีดำ โปรเจกเตอร์จึงฉายแสงเฉพาะหน้ากระดาษ"]}, {"id": 19, "date": "2026-11-20", "items": ["ขยายหน้าจออยู่ มีปุ่ม หน้าใหม่ ข้างเลขหน้าที่มุมล่าง แตะครั้งเดียวได้หน้าใหม่ต่อจากหน้านี้ ขยายเท่าเดิม พร้อมเขียนที่มุมบนซ้าย"]}, {"id": 18, "date": "2026-11-19", "items": ["เขียนตอนขยายหน้าจอ เส้นไม่หดตรงมุมเมื่อยกปากกาแล้ว ตัวอักษรอยู่ตรงที่เขียนเหมือนตอนกำลังเขียน", "ขยายหน้าจอแล้วพักปากกาครู่หนึ่งขณะเขียน ตัวอักษรไม่ถูกเปลี่ยนเป็นรูปทรงอีก วาดค้างไว้ให้เป็นรูปทรงยังใช้ได้กับรูปที่ใหญ่กว่าลายมือบนหน้า", "ห้องเรียนสดที่ครูเปิด PDF แอปของนักเรียนไม่ปิดเองเพราะหน่วยความจำเต็มอีก"]}, {"id": 17, "date": "2026-11-18", "items": ["มอบหมายการบ้าน กดปุ่มแล้วขึ้น กำลังมอบหมาย และ มอบหมายแล้ว กดซ้ำไม่ได้ จึงไม่มีการบ้านซ้ำ ลิงก์กับ QR เลื่อนขึ้นมาให้เห็นทันที"]}, {"id": 16, "date": "2026-11-18", "items": ["ตั้งค่าคลาวด์ใหม่ ที่เมนู แท็บ บัญชี ซิงก์ และ AI ใช้คลาวด์ BURIN ได้ทันทีโดยไม่ต้องตั้งค่า", "ใช้ Supabase ของตัวเองได้ในหัวข้อ ขั้นสูง และสลับกลับมาคลาวด์ BURIN ได้ทุกเมื่อ สมุดทั้งสองที่ไม่หาย"]}, {"id": 15, "date": "2026-11-18", "items": ["ลืมรหัสผ่าน ตั้งรหัสใหม่ได้จากหน้าเข้าสู่ระบบ กด ลืมรหัสผ่าน แล้วทำตามอีเมลที่ได้รับ", "สมัครบัญชีใหม่แล้วยืนยันอีเมลได้ในแอป และกดส่งอีเมลยืนยันอีกครั้งได้"]}, {"id": 14, "date": "2026-11-18", "items": ["ห้องเรียนสดที่ลืมปิดปิดเอง เมื่อกลับมาที่แอปหลังห่างไปเกิน 1 ชั่วโมง ห้องไม่เปิดต่อเองและไม่ส่งสิ่งที่เขียนให้ผู้เรียน แตะ เปิดห้องเดิมอีกครั้ง ได้รหัสเดิม", "ห้องที่ไม่มีผู้เรียนและครูไม่ได้ใช้แอปนาน 30 นาทีปิดเอง มีแถบบอกก่อน 1 นาที ครูที่กำลังสอนห้องไม่ปิด แม้ผู้เรียนล็อกจอ", "ปิดห้องแล้วผู้เรียนยังส่งการบ้านได้ถึงเวลาที่กำหนด และเห็นปุ่มไปที่งานของฉัน"]}, {"id": 13, "date": "2026-11-17", "items": ["ข้อความที่พิมพ์ไม่ต้องรอ AI สมการที่พิมพ์ เช่น y = 2x + 1 สร้างกราฟได้ทันที ตารางที่พิมพ์เป็นข้อมูลได้ทันที และตรวจหน่วยของบรรทัดคำนวณที่พิมพ์ได้ทันที ใช้ได้แม้ไม่มีอินเทอร์เน็ต", "วาดใหม่ จัดเส้นตรง สี่เหลี่ยม วงกลม ในภาพร่างให้เรียบร้อยทันทีโดยไม่ใช้ AI ตัวอักษรยังเป็นลายมือเดิม ถ้าต้องการให้แก้ตามเนื้อหา กด ให้ AI วาดใหม่ตามเนื้อหา", "หลังทำแบบฝึก บทที่ยังอ่อนบอกชนิดข้อที่พลาด และความเข้าใจที่ควรแก้จากตัวเลือกที่ตอบ"]}, {"id": 12, "date": "2026-11-17", "items": ["ลายมือที่ AI อ่านแล้วไม่ต้องอ่านซ้ำ แปลงเป็นตัวพิมพ์ แก้สมการ สร้างรูป ตรวจหน่วย และสร้างโจทย์ จากลายมือเดิมใช้คำที่อ่านไว้ เร็วขึ้นและไม่ส่งภาพซ้ำ ถ้าอ่านผิด สั่งงานเดิมอีกครั้ง AI จะอ่านใหม่", "ค้นหาในทุกสมุดพบลายมือที่ AI เคยอ่านแล้วด้วย"]}, {"id": 11, "date": "2026-11-17", "items": ["ทดลองวางวัตถุสามมิติบนโต๊ะจริง (AR) ได้ที่ ปุ่ม สมุดทั้งหมด แท็บ ภาษา การเขียน และจอ หัวข้อ ลองดูในห้องจริง ใช้ได้บน iPad และ iPhone แอปสร้างไฟล์ในเครื่องเอง ไม่ใช้ AI"]}, {"id": 10, "date": "2026-11-17", "items": ["คอมที่ต่อจอที่สอง เลือก จอที่สอง ผู้ชมไม่เห็นแถบ ในเมนู นำเสนอ ครูใช้ได้ทุกคำสั่ง จอใหญ่เห็นแต่หน้ากระดาษ ไม่ต้องใช้อินเทอร์เน็ต", "ระหว่างเปิดจอผู้ชม ครูมีแถบเล็ก จอผู้ชม เลือกให้จอใหญ่เห็นทั้งหน้า พักจอ หรือปิด (ปุ่ม B บนคีย์บอร์ดหรือรีโมตก็พักจอได้)", "ต่อ iPad ออกทีวีด้วยสาย ใช้ ต่อสาย จอสะอาด ในเมนู นำเสนอ (ปุ่ม สอนและนำเสนอ)", "เริ่มแล้วจอเห็นแต่หน้ากระดาษ ไม่มีแถบหรือปุ่มใดขึ้นเลย ทั้งบน iPad และทีวี", "ก่อนเริ่ม เลือกปากกาให้แต่ละขอบจอ (สี ไฮไลต์ ยางลบ หรือเลเซอร์) ระหว่างนำเสนอ แตะขอบจอด้วยนิ้วเพื่อหยิบปากกาของขอบนั้น", "เลือกได้ว่าให้เห็นทั้งหน้า และเริ่มด้วยม่านบังครึ่งล่างที่ใช้นิ้วลากลงเพื่อเปิดทีละบรรทัด", "แตะค้างสามนิ้ว 1 วินาที เพื่อออก ใช้รีโมตนำเสนอเปลี่ยนหน้า ปุ่ม B พักจอ ปุ่ม Esc ออก", "เมนู นำเสนอ เหลือสามข้อ จอแสดงผลแบบนักเรียนบนอีกเครื่องและบนจอที่สองรวมเป็นข้อเดียว"]}, {"id": 9, "date": "2026-11-17", "items": ["แถบบนเหลือปุ่มน้อยลง ปุ่มที่ใช้นาน ๆ ครั้ง รวมอยู่ในสองกลุ่ม", "ปุ่ม ต่อยอดจากหน้า มี แปลงเป็นตัวพิมพ์ สร้างโจทย์ และ ชุดโจทย์", "ปุ่ม สอนและนำเสนอ มี ห้องสด นำเสนอ และ ห้องเรียนและโจทย์ (ฝั่งนักเรียนชื่อ ห้องเรียน มี สแกน QR และ เข้าห้องเรียน ด้วย)", "เลือกด้วยบ่วงแล้ว แถบเหนือส่วนที่เลือก แสดงคำสั่งที่ใช้บ่อยก่อน คำสั่งอื่นอยู่ที่ปุ่ม เพิ่มเติม", "หาคำสั่งไม่เจอ พิมพ์ชื่อในช่องค้นหาที่เมนู เช่น PDF หรือ สามมิติ แล้วแตะคำสั่งที่ขึ้นมา"]}, {"id": 8, "date": "2026-11-16", "items": ["สร้างโจทย์ด้วย AI จากกี่หน้าก็ได้ ทั้งเล่ม ตามบท หรือเป็นช่วงหน้า", "อยู่ที่ปุ่ม สร้างโจทย์ด้วย AI หัวข้อ หน้าที่ใช้สร้างโจทย์ แตะ ทั้งเล่ม หรือแตะชื่อบท หรือใส่ช่วงหน้า แล้วกด เลือกช่วงนี้", "หน้าที่ AI อ่านแล้ว เก็บไว้ในเครื่องนี้ ครั้งต่อไป ไม่ต้องอ่านซ้ำ จึงเร็วขึ้น และประหยัดค่า AI"]}, {"id": 7, "date": "2026-11-16", "items": ["ลบผิด หรือเขียนทับผิด ดึงหน้า เมื่อไม่กี่นาทีก่อน หรือเมื่อวาน กลับมาได้", "อยู่ที่ ลิ้นชักหน้า แตะแถบ หน้านี้ ด้านล่าง แล้วกดปุ่ม รุ่นก่อนของหน้านี้ เลือกรุ่น ดูภาพหน้าก่อน แล้วกด คืนหน้าเป็นรุ่นนี้", "หน้าก่อนคืน ถูกเก็บไว้ด้วย จึงย้อนกลับได้ แอปเก็บรุ่นก่อน ไว้ในเครื่องนี้ 30 วัน"]}, {"id": 6, "date": "2026-11-16", "items": ["บัญชีคลาวด์ ส่งออกข้อมูลทั้งบัญชี เป็นไฟล์เดียวได้ ทั้งสมุด หน้า หมึก รูป วิดีโอ เลคเชอร์ที่แชร์ การบ้าน และงานที่นักเรียนส่ง", "อยู่ที่ เมนู แท็บตั้งค่า หัวข้อ ข้อมูลทั้งบัญชี กดปุ่ม ส่งออกทั้งบัญชี", "นำเข้าไฟล์นี้ ในบัญชีอื่น หรือเครื่องใหม่ได้ การนำเข้า เพิ่มเฉพาะส่วนที่ยังไม่มี ไม่ทับ และไม่ลบ ของที่มีอยู่"]}, {"id": 5, "date": "2026-11-15", "items": ["ลบสมุด หรือลบหน้าแล้ว ยังกู้คืนได้ ภายใน 30 วัน สิ่งที่ลบ ไปอยู่ในถังขยะ ก่อนถูกลบจริง", "เปิดถังขยะ ได้ที่ เมนู สมุดทั้งหมด ปุ่มถังขยะ ใต้รายการสมุด กดกู้คืน แล้วสมุดกลับไป ที่เดิม หน้ากลับไป ตำแหน่งเดิม ในสมุด", "ลบถาวร ทีละรายการ หรือลบทั้งหมด ในถังขยะได้ ครบ 30 วัน แล้วแอปลบให้เอง"]}, {"id": 4, "date": "2026-11-15", "items": ["สำรองสมุด ทั้งหมดเป็นไฟล์เดียว ได้ที่ เมนู แท็บตั้งค่า หัวข้อ สมุดในเครื่องนี้ ไฟล์เก็บสมุดทุกเล่ม รูป และวิดีโอ ในเครื่องนี้", "นำสมุดคืน จากไฟล์สำรอง ได้ที่เดียวกัน การนำคืน เพิ่มเฉพาะส่วน ที่ยังไม่มีในเครื่อง ไม่ทับ และไม่ลบ ของที่มีอยู่", "แอปขอให้เบราว์เซอร์ เก็บสมุดในเครื่อง ไว้ถาวร และเตือนให้สำรองสมุด ที่หน้ารายการสมุด เมื่อสมุดเปลี่ยนไป ตั้งแต่สำรองครั้งล่าสุด", "บน iPad และ iPhone ใน Safari แอปชวนให้ เพิ่มลงหน้าจอโฮม เพื่อไม่ให้ Safari ลบสมุด ที่ไม่ได้เปิดนาน ให้สำรองสมุดก่อน แล้วนำคืน ในแอปบนหน้าจอโฮม"]}, {"id": 3, "date": "2026-11-14", "items": ["สารบัญ ของสมุด แตะปุ่มหน้าในสมุด ที่มุมซ้ายบน แล้วเลือก สารบัญ จะเห็นหัวเรื่อง ของทุกหน้า แตะหัวเรื่อง เพื่อไปที่หน้านั้น ได้ทันที", "หัวเรื่อง มาจากข้อความที่พิมพ์ไว้ บนสุดของหน้า หรือบรรทัด ที่ขึ้นต้นด้วย ## ลายมือที่ยังไม่ได้แปลง เป็นตัวพิมพ์ ไม่ขึ้นในสารบัญ", "ที่คั่นหน้า แตะ ปักที่คั่นหน้านี้ ในหน้าสารบัญ แล้วตั้งชื่อเองได้ หน้าที่มีที่คั่น จะมีริบบิ้นสีแดง ที่ภาพหน้า", "ที่คั่นหน้า อยู่กับสมุด ของเราเท่านั้น ผู้เรียนในห้องสด ไม่เห็นที่คั่นหน้า ของครู"]}, {"id": 2, "date": "2026-11-14", "items": ["ค้นหาข้อความ ในทุกสมุดได้แล้ว พิมพ์คำในช่องค้นหาที่เมนู แอปจะค้นทั้งชื่อสมุด ข้อความที่พิมพ์ ลายมือที่แปลงเป็นตัวพิมพ์แล้ว หัวเรื่องของหน้า และข้อความในกล่องต่าง ๆ", "แตะผลการค้นหา เพื่อไปที่หน้านั้น กล่องที่มีคำนั้นจะเรืองแสงสักครู่ ให้เห็นตำแหน่ง", "พิมพ์คำไทย ติดกันหรือเว้นวรรค ก็ค้นเจอเหมือนกัน การค้นหาอ่านสมุดอย่างเดียว ไม่แก้ไขอะไรในสมุด"]}, {"id": 1, "date": "2026-11-13", "items": ["ดูเวอร์ชันของแอปได้ที่เมนู แท็บตั้งค่า หัวข้อเกี่ยวกับแอป", "เมื่อมีเวอร์ชันใหม่ระหว่างใช้งาน แอปจะไม่รีโหลดเอง รวมถึงจอผู้ชม เวอร์ชันใหม่จะมีผล เมื่อเปิดแอปครั้งถัดไป หรือเมื่อแตะแถบ มีเวอร์ชันใหม่", "หน้าที่เปิดค้างไว้ ใช้ส่วนต่าง ๆ ของแอป จากเวอร์ชันเดียวกับตัวเองเสมอ ไม่ปนกับเวอร์ชันใหม่", "เมื่อแอปทำงานผิดพลาด แอปจะส่งรายงาน ให้ผู้พัฒนา โดยส่งเฉพาะ ข้อความแจ้งข้อผิดพลาด ตำแหน่งในโค้ด รุ่นเครื่อง และเวอร์ชันของแอป ไม่ส่งเนื้อหาสมุด ชื่อ หรืออีเมล"]}];
 const TH_MON = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
 function thDay(iso) { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso || ''); return m ? (+m[3]) + ' ' + TH_MON[+m[2] - 1] + ' ' + (+m[1] + 543) : ''; }
 function renderVersion() { const el = $('#verNote'); if (el) el.innerHTML = 'เวอร์ชัน <span class="nowrap">' + esc(VERSION.startsWith('__') ? 'ในเครื่อง (ยังไม่ได้ประกอบ)' : VERSION) + '</span>'; }
