@@ -17,6 +17,8 @@ const scTxt = (t, n) => String(t == null ? '' : t).replace(/[<>]/g, '').slice(0,
 const SC_PAL = ['#2F4BB8', '#C2571A', '#2E8B57', '#7B4FC9', '#D14D8B', '#0E9AA7', '#B8860B', '#5A6472'];
 
 /* clean anything that came from AI or another device before it runs */
+/* the pairs of colours for the two phases of an orbital (blue and orange first, as drawn until now) */
+const ORB_COLS = [['#2F4BB8', '#E39B2D', 'น้ำเงินกับส้ม'], ['#C62828', '#2E7D32', 'แดงกับเขียว'], ['#6A1B9A', '#F9A825', 'ม่วงกับเหลือง'], ['#00838F', '#D81B60', 'ฟ้ากับชมพู'], ['#37474F', '#90A4AE', 'เทาเข้มกับเทาอ่อน']];
 function scClean(sp) {
   sp = sp && typeof sp === 'object' ? sp : {};
   const dom = ['phys', 'chem', 'bio', 'math'].includes(sp.domain) ? sp.domain : 'phys';
@@ -685,6 +687,18 @@ function buildScene(d, it, forExport) {
     const pen = document.createElement('button'); pen.type = 'button'; pen.textContent = sp.pen ? 'สีเรียบ' : 'สีไม้'; pen.onclick = () => { const before = clone(S.page.items || []), items = clone(before), x = items.find((t) => t.id === it.id); if (!x) return; x.spec.pen = !x.spec.pen; setItems(items, before); };
     const fr = document.createElement('button'); fr.type = 'button'; fr.textContent = 'แสดงกรอบ'; fr.onclick = () => frameSwap(false);
     sb2.append(pen, fr);
+    /* orbitals: the colours of the two phases, chosen here (owner 21 พ.ย. 2569); one step of undo, like the other buttons */
+    if ((sp.items || []).some((x) => x.type === 'orbital')) {
+      const cr = document.createElement('div'); cr.className = 'orbcols'; cr.setAttribute('role', 'group'); cr.setAttribute('aria-label', 'สีของออร์บิทัล');
+      const cur = (sp.items.find((x) => x.type === 'orbital') || {}).color;
+      for (const [c1, c2, nm] of ORB_COLS) {
+        const b = document.createElement('button'); b.type = 'button'; b.title = nm; b.setAttribute('aria-label', 'สี' + nm); b.setAttribute('aria-pressed', cur === c1 ? 'true' : 'false');
+        b.innerHTML = '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2a8 8 0 0 0 0 16z" fill="' + c1 + '"/><path d="M10 2a8 8 0 0 1 0 16z" fill="' + c2 + '"/></svg>';
+        b.onclick = () => { const before = clone(S.page.items || []), items = clone(before), x = items.find((t) => t.id === it.id); if (!x) return; (x.spec.items || []).forEach((o) => { if (o.type === 'orbital') { o.color = c1; o.col2 = c2; } }); setItems(items, before); };
+        cr.appendChild(b);
+      }
+      sb2.appendChild(cr);
+    }
     [...d.children].filter((x) => x !== cv).forEach((x) => pill.appendChild(x));
     d.appendChild(hb); d.appendChild(pill);
   }
@@ -1619,7 +1633,11 @@ function renderScenePicker(box, dom, q) {
   const ai = document.createElement('div'); ai.className = 'scnai';
   ai.innerHTML = '<label class="field"><span>ไม่มีแบบที่ต้องการ อธิบายสิ่งที่อยากให้ขยับ แล้วให้ AI สร้าง</span><textarea rows="2" placeholder="เช่น กล่อง 2 kg ถูกดึงด้วยแรง 10 N ทำมุม 30 องศา บนพื้นที่มีแรงเสียดทาน 0.2"></textarea></label><button class="btn solid" type="button">สร้างแบบจำลอง</button><div class="note small">หรือวาดภาพบนหน้า วงรอบด้วยบ่วงเลือก แล้วกด "ขยับได้"</div>';
   ai.querySelector('button').onclick = async () => {
-    const t = ai.querySelector('textarea').value.trim(); if (!t) return; if (!needAI('gen')) return; if (typeof convNote === 'function') convNote('asked', t);
+    const t = ai.querySelector('textarea').value.trim(); if (!t) return;
+    /* task 8.19: a problem of a clear kind (free fall, projectile, incline, spring, pendulum) is built here with its numbers, no AI */
+    let loc = null; try { loc = typeof stScene === 'function' ? stScene(t) : null; } catch (e) { loc = null; }
+    if (loc) { $('#simSheet').hidden = true; insertScene(loc); toast('สร้างแบบจำลองจากตัวเลขในโจทย์แล้ว ' + (loc.note || ''), 4000); return; }
+    if (!needAI('gen')) return; if (typeof convNote === 'function') convNote('asked', t);
     const bt = ai.querySelector('button'); bt.disabled = true;
     const wt = document.createElement('div'); bt.after(wt); waitCard(wt, 'AI กำลังสร้างแบบจำลอง', ['อ่านคำอธิบาย', 'สร้างตามหลักวิชา'], { cancel: false });
     try { const spec = await sceneFromAI(t, null); $('#simSheet').hidden = true; insertScene(spec); } catch (e) { toast('สร้างไม่สำเร็จ ลองอธิบายให้ชัดขึ้น', 3000); }
@@ -1650,6 +1668,127 @@ function renderScenePicker(box, dom, q) {
   }
   if (q && !shown) box.appendChild(Object.assign(document.createElement('div'), { className: 'note', textContent: 'ไม่พบแบบจำลองที่ตรงกับคำค้น ลองคำอื่น หรือให้ AI สร้างจากคำอธิบายด้านล่าง' }));
   box.appendChild(ai);
+}
+
+/* ---------- a typed problem with a clear form becomes a moving model with no AI (task 8.19 group 6). Built into the part
+   "scene" after scene.js, so it starts from the same ready-made models (SCENE_TPL). The kinds read here:
+     free fall (ตกอิสระ, ปล่อยจากที่สูง h, โยนขึ้น or ลง with a speed), a projectile (โพรเจกไทล์, ขว้าง, ยิง with a
+     speed and an angle, from the ground or from a height), a box on an incline (angle, μ, mass, length), a mass on a
+     spring (k, m, amplitude) and a simple pendulum (length, angle, mass)
+   The numbers of the problem go into the model, and what the laws give is worked out here for the note under it:
+   time of flight, range, highest point, speed at the ground, acceleration down the incline, period.
+   Anything else returns null and the AI makes the model as before. "scenetext" in flags.json turns it off (or
+   "localcalc") ---------- */
+function stOn() { return flagOn('scenetext') && flagOn('localcalc'); }
+const stR = (v) => { if (!isFinite(v)) return String(v); return Number(v.toPrecision(Math.abs(v) >= 100 ? 4 : 3)).toString(); };
+function stClean(t) {
+  return String(t || '').replace(/\$/g, ' ').replace(/\\text\{([^}]*)\}|\\mathrm\{([^}]*)\}/g, '$1$2').replace(/\^\s*\{?\\circ\}?|\\degree/g, '°').replace(/\\(?:theta|mu|,|;| )/g, (m) => (m === '\\theta' ? 'θ' : m === '\\mu' ? 'μ' : ' '))
+    .replace(/[{}]/g, '').replace(/[−–]/g, '-').replace(/[๐-๙]/g, (d) => '๐๑๒๓๔๕๖๗๘๙'.indexOf(d)).replace(/\s+/g, ' ').trim();
+}
+const ST_N = '(\\d+(?:\\.\\d+)?)';
+/* the number written with one of these units, or after one of these names */
+function stVal(t, units, names) {
+  if (names) for (const n of names) { const m = t.match(new RegExp('(?:^|[^A-Za-z])' + n + '\\s*(?:=|:|เท่ากับ|คือ)?\\s*' + ST_N)); if (m) return +m[1]; }
+  if (units) { const m = t.match(new RegExp(ST_N + '\\s*(?:' + units + ')(?![A-Za-z/])')); if (m) return +m[1]; }
+  return null;
+}
+const stSpeed = (t) => stVal(t, 'm/s|เมตร\\s*ต่อ\\s*วินาที|เมตร/วินาที', ['v_?0', 'u', 'v', 'อัตราเร็ว(?:ต้น)?', 'ความเร็ว(?:ต้น)?']);
+const stAngle = (t) => stVal(t, '°|องศา|deg', ['θ', 'มุม']);
+const stLen = (t, names) => stVal(t, null, names);
+const stMeters = (t) => { const m = t.match(new RegExp(ST_N + '\\s*(?:m|เมตร)(?![A-Za-z/])(?!\\s*ต่อ)')); return m ? +m[1] : null; };
+function stG(t) { const g = stVal(t, null, ['g']); return g && g > 0 && g < 50 ? g : 9.8; }
+function stMass(t) { const m = stVal(t, 'kg|กิโลกรัม', ['m']); return m && m > 0 ? m : null; }
+const stCopy = (name) => { for (const k in SCENE_TPL) { const x = (SCENE_TPL[k] || []).find((r) => r[0] === name); if (x) return JSON.parse(JSON.stringify(x[2])); } return null; };
+
+function stProjectile(t, g) {
+  const v = stSpeed(t); if (!v || v <= 0) return null;
+  const horiz = /แนวระดับ|แนวนอน|horizontal/i.test(t);
+  let ang = stAngle(t); if (ang == null) ang = horiz ? 0 : null; if (ang == null || ang < 0 || ang >= 90) return null;
+  const h0 = /สูง|หน้าผา|ตึก|height|cliff|tower/i.test(t) ? (stLen(t, ['h', 'ความสูง', 'สูง']) || stMeters(t) || 0) : 0;
+  const vx = v * Math.cos(ang * Math.PI / 180), vy = v * Math.sin(ang * Math.PI / 180);
+  const tf = (vy + Math.sqrt(vy * vy + 2 * g * h0)) / g, R = vx * tf, H = h0 + vy * vy / (2 * g);
+  const W = Math.max(R * 1.2 + 2, 6), Hh = Math.max(H * 1.35 + 1, 3), r = Math.max(0.12, W / 90);
+  const sp = stCopy('โพรเจกไทล์'); if (!sp) return null;
+  const x0 = h0 > 0 ? 0.08 * W : 0.04 * W;
+  sp.title = 'โพรเจกไทล์ v = ' + stR(v) + ' m/s มุม ' + stR(ang) + '°' + (h0 ? ' จากสูง ' + stR(h0) + ' m' : '');
+  sp.world = { w: W, h: Hh, g };
+  sp.bodies[0] = Object.assign(sp.bodies[0], { r, x: x0, y: h0 + r, vx, vy, e: 0 });
+  /* a rough ground, so the ball stops near where it lands and the range reads from the picture */
+  sp.surfaces = [{ x1: 0, y1: 0, x2: W, y2: 0, mu: 0.9, mus: 1 }].concat(h0 > 0 ? [{ x1: 0, y1: h0, x2: x0 + r * 1.5, y2: h0 }, { x1: x0 + r * 1.5, y1: h0, x2: x0 + r * 1.5, y2: 0 }] : []);
+  sp.params = [{ key: 'A.vx', label: 'ความเร็วต้นแนวราบ (m/s)', min: 0, max: Math.ceil(v * 2), step: 0.5 }, { key: 'A.vy', label: 'ความเร็วต้นแนวดิ่ง (m/s)', min: 0, max: Math.ceil(v * 2), step: 0.5 }, { key: 'g', label: 'g (m/s²)', min: 1, max: 20, step: 0.1 }];
+  sp.note = 'ลอยอยู่ ' + stR(tf) + ' s ตกไกล ' + stR(R) + ' m สูงสุด ' + stR(H) + ' m จากพื้น (คิดในเครื่อง ไม่คิดแรงต้านอากาศ)';
+  return sp;
+}
+function stFall(t, g) {
+  const h0 = stLen(t, ['h', 'ความสูง', 'สูง']) || stMeters(t); if (!h0 || h0 <= 0) return null;
+  const v = stSpeed(t) || 0, up = /ขึ้น|upward|\bup\b/i.test(t), vy = up ? v : -v;
+  const tf = (vy + Math.sqrt(vy * vy + 2 * g * h0)) / g, vEnd = Math.sqrt(vy * vy + 2 * g * h0), H = h0 + (vy > 0 ? vy * vy / (2 * g) : 0);
+  const sp = stCopy('โพรเจกไทล์'); if (!sp) return null;
+  const Hh = H * 1.25 + 1, W = Math.max(4, Hh * 0.6), r = Math.max(0.12, Hh / 60);
+  sp.title = (v ? (up ? 'โยนขึ้น ' : 'ขว้างลง ') + stR(v) + ' m/s ' : 'ปล่อยให้ตก ') + 'จากสูง ' + stR(h0) + ' m';
+  sp.world = { w: W, h: Hh, g };
+  sp.bodies[0] = Object.assign(sp.bodies[0], { r, x: W / 2, y: h0 + r, vx: 0, vy, e: 0 });
+  sp.surfaces = [{ x1: 0, y1: 0, x2: W, y2: 0 }];
+  sp.params = [{ key: 'A.vy', label: 'ความเร็วต้น (m/s) บวกคือขึ้น', min: -Math.ceil(v * 2 + 10), max: Math.ceil(v * 2 + 10), step: 0.5 }, { key: 'g', label: 'g (m/s²)', min: 1, max: 20, step: 0.1 }];
+  sp.show = Object.assign({}, sp.show, { v: true, graph: 'vy' });
+  sp.note = 'ถึงพื้นใน ' + stR(tf) + ' s ด้วยอัตราเร็ว ' + stR(vEnd) + ' m/s' + (vy > 0 ? ' ขึ้นได้สูงสุด ' + stR(H) + ' m จากพื้น' : '') + ' (คิดในเครื่อง ไม่คิดแรงต้านอากาศ)';
+  return sp;
+}
+function stIncline(t, g) {
+  const ang = stAngle(t); if (ang == null || ang <= 0 || ang >= 80) return null;
+  const mu = stVal(t, null, ['μ_?k', 'μ', 'mu', 'สัมประสิทธิ์ความเสียดทาน(?:จลน์)?']) || 0, mus = stVal(t, null, ['μ_?s']) || Math.max(mu, mu * 1.2);
+  const m = stMass(t) || 2, L = stLen(t, ['L', 'ยาว', 'ความยาว']) || 4, th = ang * Math.PI / 180;
+  const d = L * Math.cos(th), hgt = L * Math.sin(th), x1 = 0.5, y1 = 0.4 + hgt, x2 = x1 + d, y2 = 0.4, W = x2 + 1.6, Hh = y1 + 1;
+  const sp = stCopy('พื้นเอียงมีแรงเสียดทาน'); if (!sp) return null;
+  /* the box: a fifth of the way down, its centre half its height above the slope along the normal */
+  const bw = Math.min(0.8, L / 5), bh = bw * 0.6, s = 0.2 * L, px = x1 + s * Math.cos(th), py = y1 - s * Math.sin(th), nx = Math.sin(th), ny = Math.cos(th);
+  sp.title = 'กล่องบนพื้นเอียง ' + stR(ang) + '°';
+  sp.world = { w: W, h: Hh, g };
+  sp.bodies[0] = Object.assign(sp.bodies[0], { m, w: bw, h: bh, x: px + nx * bh / 2, y: py + ny * bh / 2 });
+  sp.surfaces = [{ x1, y1, x2, y2, mu, mus }, { x1: 0, y1: 0.4, x2: W, y2: 0.4, mu: 0.4 }, { x1: W - 0.05, y1: 0.4, x2: W - 0.05, y2: 1.6 }];
+  const slides = Math.tan(th) > mus, a = g * (Math.sin(th) - mu * Math.cos(th));
+  sp.note = slides ? 'กล่องไถลลงด้วยความเร่ง ' + stR(Math.max(0, a)) + ' m/s² (g sinθ − μg cosθ คิดในเครื่อง)' : 'กล่องไม่ไถล เพราะ tanθ = ' + stR(Math.tan(th)) + ' ไม่เกิน μs = ' + stR(mus) + ' (คิดในเครื่อง)';
+  return sp;
+}
+function stSpring(t) {
+  const k = stVal(t, 'N/m|นิวตัน\\s*ต่อ\\s*เมตร', ['k']); if (!k || k <= 0) return null;
+  const m = stMass(t) || 1, A = stVal(t, null, ['A', 'แอมพลิจูด', 'ดึงออก', 'ยืดออก']) || stMeters(t) || 0.4;
+  const sp = stCopy('มวลติดสปริง'); if (!sp) return null;
+  const L0 = 1.8, Aa = Math.min(Math.max(A, 0.05), 1.4);
+  sp.title = 'มวล ' + stR(m) + ' kg ติดสปริง k = ' + stR(k) + ' N/m';
+  sp.world = { w: Math.max(4, 0.2 + L0 + Aa + 1), h: 1.6, g: 9.8 };
+  sp.bodies[0] = Object.assign(sp.bodies[0], { m, x: 0.2 + L0 + Aa });
+  sp.springs[0] = Object.assign(sp.springs[0], { k, L0 });
+  sp.params = [{ key: 'K1.k', label: 'k (N/m)', min: Math.max(1, Math.floor(k / 4)), max: Math.ceil(k * 3), step: Math.max(1, Math.round(k / 40)) }, { key: 'A.m', label: 'มวล (kg)', min: 0.1, max: Math.ceil(m * 4), step: 0.1 }];
+  const T = 2 * Math.PI * Math.sqrt(m / k);
+  sp.note = 'คาบ T = 2π√(m/k) = ' + stR(T) + ' s ความถี่ ' + stR(1 / T) + ' Hz อัตราเร็วสูงสุด ' + stR(Aa * Math.sqrt(k / m)) + ' m/s (คิดในเครื่อง)';
+  return sp;
+}
+function stPendulum(t, g) {
+  const L = stLen(t, ['L', 'ยาว', 'ความยาว', 'เชือกยาว']) || stMeters(t); if (!L || L <= 0) return null;
+  const ang = stAngle(t) || 15, m = stMass(t) || 0.5, th = Math.min(80, Math.max(2, ang)) * Math.PI / 180;
+  const sp = stCopy('ลูกตุ้มอย่างง่าย'); if (!sp) return null;
+  const W = 2.4 * L + 0.8, Hh = L + 0.8, ax = W / 2, ay = Hh - 0.3, r = Math.max(0.05, L / 18);
+  sp.title = 'ลูกตุ้มยาว ' + stR(L) + ' m';
+  sp.world = { w: W, h: Hh, g };
+  sp.bodies[0] = Object.assign(sp.bodies[0], { m, r, x: ax + L * Math.sin(th), y: ay - L * Math.cos(th) });
+  sp.ropes[0] = Object.assign(sp.ropes[0], { ax, ay });
+  const T = 2 * Math.PI * Math.sqrt(L / g);
+  sp.note = 'คาบ T = 2π√(L/g) ≈ ' + stR(T) + ' s (มุมเล็ก คิดในเครื่อง) ความเร็วสูงสุดที่จุดต่ำสุด ' + stR(Math.sqrt(2 * g * L * (1 - Math.cos(th)))) + ' m/s';
+  return sp;
+}
+/* the model for a typed problem, or null (the AI makes it as before) */
+function stScene(text) {
+  if (!stOn()) return null;
+  const t = stClean(text); if (!t || t.length > 400) return null;
+  const g = stG(t);
+  let sp = null;
+  if (/ลูกตุ้ม|pendulum/i.test(t)) sp = stPendulum(t, g);
+  else if (/สปริง|spring/i.test(t)) sp = stSpring(t);
+  else if (/พื้นเอียง|incline|ทางลาด/i.test(t)) sp = stIncline(t, g);
+  else if (/โพรเจกไทล์|projectile|ขว้าง|ยิง|เตะ|ทำมุม/i.test(t) && (stAngle(t) != null || /แนวระดับ|แนวนอน|horizontal/i.test(t))) sp = stProjectile(t, g);
+  else if (/ตกอิสระ|ปล่อย|ตกจาก|free\s*fall|โยน|ขว้างลง|drop|throw/i.test(t)) sp = stFall(t, g);
+  return sp ? scClean(sp) : null;
 }
 
 
@@ -1908,7 +2047,9 @@ function orb3Draw(g, it, sp, L, rt) {
   }
   if (sp.pen) g.ball([0, 0, 0], L * 0.02, '#3A3F48'); else g.ball([0, 0, 0], L * 0.025, '#333333');
   const nm = list.length > 1 && !it.pick ? list.map((x) => ORB_NAMES[x] || x).join(', ') : (ORB_NAMES[o] || o);
-  rt.read = [['ออร์บิทัล', nm], ['สี', 'น้ำเงิน เฟสบวก, ส้ม เฟสลบ']];
+  /* the names of the colours chosen for the two phases (scene.js ORB_COLS); a colour not in the list keeps the old words */
+  const cn = { '#2F4BB8': 'น้ำเงิน', '#E39B2D': 'ส้ม', '#C62828': 'แดง', '#2E7D32': 'เขียว', '#6A1B9A': 'ม่วง', '#F9A825': 'เหลือง', '#00838F': 'ฟ้า', '#D81B60': 'ชมพู', '#37474F': 'เทาเข้ม', '#90A4AE': 'เทาอ่อน' };
+  rt.read = [['ออร์บิทัล', nm], ['สี', (cn[String(c1).toUpperCase()] || 'น้ำเงิน') + ' เฟสบวก, ' + (cn[String(c2).toUpperCase()] || 'ส้ม') + ' เฟสลบ']];
 }
 /* ----- coloured pencil: the shape is drawn on a layer of its own, its colour broken into short slanted strokes so the
    paper shows through, with a soft pencil line round the outside. The grain stays put on the paper while the shape turns ----- */
