@@ -18,6 +18,8 @@ const SC_PAL = ['#2F4BB8', '#C2571A', '#2E8B57', '#7B4FC9', '#D14D8B', '#0E9AA7'
 
 /* clean anything that came from AI or another device before it runs */
 /* the pairs of colours for the two phases of an orbital (blue and orange first, as drawn until now) */
+/* the colours an animal can be drawn in (task 9.10): '' is as in nature, the others colour its body */
+const AN_COLS = [['', 'สีตามธรรมชาติ'], ['#8B5A2B', 'น้ำตาล'], ['#3A3A40', 'ดำ'], ['#ECE6D6', 'ขาว'], ['#5E9E3A', 'เขียว'], ['#2F4BB8', 'น้ำเงิน'], ['#C62828', 'แดง'], ['#F2B630', 'เหลือง']];
 const ORB_COLS = [['#2F4BB8', '#E39B2D', 'น้ำเงินกับส้ม'], ['#C62828', '#2E7D32', 'แดงกับเขียว'], ['#6A1B9A', '#F9A825', 'ม่วงกับเหลือง'], ['#00838F', '#D81B60', 'ฟ้ากับชมพู'], ['#37474F', '#90A4AE', 'เทาเข้มกับเทาอ่อน']];
 function scClean(sp) {
   sp = sp && typeof sp === 'object' ? sp : {};
@@ -569,7 +571,7 @@ function scTick(ts) {
     if (!r.playing) continue; const it = findItem(id); if (!it) { r.playing = false; continue; }
     if (!r.cv || !r.cv.isConnected) continue;
     any = true; if (offView(r.cv)) continue; const sp = it.spec;
-    if (sp.dim === 3) { sc3Tick(sp, r, dtw); scRender(it, r); continue; }
+    if (sp.dim === 3) { if (sc3Tick(sp, r, dtw, it) !== false) scRender(it, r); continue; }
     if (sp.domain === 'phys') { if (r.turning != null) { r.turning += dtw / 0.4; if (r.turning >= 0.5 && !r.turned) { ipTurn(it, r); r.turned = true; } if (r.turning >= 1) { r.turning = null; r.turned = false; } scRender(it, r); continue; } if (r.peek) { r.peek -= dtw; if (r.peek <= 0) { r.peek = 0; r.turning = 0; r.turned = false; } scRender(it, r); continue; } const sim = dtw * (sp.speed || 1) * (r.slow ? 0.25 : 1), n = Math.max(1, Math.ceil(sim / 0.004)); for (let i = 0; i < n; i++) phStep(sp, r.st, sim / n); for (const b of r.st.bodies) { b.trail.push([b.x, b.y]); if (b.trail.length > 400) b.trail.shift(); }
       const pick = sp.show.graph; if (pick !== 'none') { r.st.hist.push([r.st.t].concat(r.st.bodies.filter((b) => !b.fixed).map((b) => pick === 'x' ? b.x : pick === 'y' ? b.y : pick === 'vx' ? b.vx : pick === 'vy' ? b.vy : pick === 'grf' ? (b.F.N ? b.F.N[1] : 0) : Math.hypot(b.vx, b.vy)))); if (r.st.hist.length > 600) r.st.hist.shift(); }
       const [x0, y0, x1, y1] = phBounds(sp, r.st), far = sp.bare ? 0.3 : Math.max(x1 - x0, y1 - y0) * 3; const edge = sp.bare && it.rig && it.rig.edge;
@@ -585,7 +587,8 @@ function scTick(ts) {
 }
 function scRender(it, r) {
   const cv = r.cv; if (!cv) return; const sp = it.spec;
-  const w = cv.clientWidth || 520, h = cv.clientHeight || 320, dpr = Math.min(4, (window.devicePixelRatio || 1) * Math.max(1, (S.base || 1) * (S.zoom || 1)));
+  if (sp.animal && r.box && r.box.isConnected) return anRender(it, r);
+  const w = cv.clientWidth || 520, h = cv.clientHeight || 320, dpr = Math.min(4, (window.devicePixelRatio || 1) * Math.max(1, (S.base || 1) * (S.zoom || 1)), sp.animal ? Math.sqrt(1.2e6 / Math.max(1, w * h)) : 4); /* an animal moves all the time: its canvas has at most 1.2 million pixels */
   if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); }
   let c = cv.getContext('2d');
   if (sp.bare) { const cap = Math.min(dpr, Math.sqrt(9e6 / Math.max(1, w * h))); if (cv.width !== Math.round(w * cap) || cv.height !== Math.round(h * cap)) { cv.width = Math.round(w * cap); cv.height = Math.round(h * cap); } c.setTransform(cap, 0, 0, cap, 0, 0); c.clearRect(0, 0, w, h); }
@@ -609,6 +612,23 @@ function scRender(it, r) {
   if (r.ro) r.ro.innerHTML = (r.read || []).map(([k, v]) => '<span><b>' + esc(String(k)) + '</b> ' + esc(String(v)) + '</span>').join('');
 }
 
+/* the room round an animal's box where it is still drawn: [left, top, right, bottom], from the size of its box */
+function anMargin(w0, h0) { return [Math.round(w0 * 0.3), Math.round(h0 * 0.6), Math.round(w0 * 0.3), Math.round(h0 * 0.25)]; }
+/* an animal: drawn as w0 x h0 (its box) on a canvas that is bigger by anMargin all round and lies over the box */
+function anRender(it, r) {
+  const cv = r.cv, bx = r.box, sp = it.spec, w0 = bx.clientWidth || 340, h0 = bx.clientHeight || 255, m = anMargin(w0, h0), W2 = w0 + m[0] + m[2], H2 = h0 + m[1] + m[3];
+  const pos = [bx.offsetLeft - m[0], bx.offsetTop - m[1], W2, H2].join();
+  if (cv._pos !== pos) { cv._pos = pos; cv.style.left = (bx.offsetLeft - m[0]) + 'px'; cv.style.top = (bx.offsetTop - m[1]) + 'px'; cv.style.width = W2 + 'px'; cv.style.height = H2 + 'px'; }
+  r.anM = m;
+  /* the same sharpness as before for the box itself (at most 1.2 million pixels in it) */
+  const dpr = Math.min(4, (window.devicePixelRatio || 1) * Math.max(1, (S.base || 1) * (S.zoom || 1)), Math.sqrt(1.2e6 / Math.max(1, w0 * h0)));
+  if (cv.width !== Math.round(W2 * dpr) || cv.height !== Math.round(H2 * dpr)) { cv.width = Math.round(W2 * dpr); cv.height = Math.round(H2 * dpr); }
+  const c = cv.getContext('2d'); c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, cv.width, cv.height);
+  c.setTransform(dpr, 0, 0, dpr, m[0] * dpr, m[1] * dpr);
+  if (!sp.clean) { c.fillStyle = '#FFFFFF'; c.fillRect(0, 0, w0, h0); }
+  sc3Render(c, w0, h0, sp, r);
+  if (r.ro) r.ro.innerHTML = (r.read || []).map(([k, v]) => '<span><b>' + esc(String(k)) + '</b> ' + esc(String(v)) + '</span>').join('');
+}
 /* ---------- the box on the page ---------- */
 function buildScene(d, it, forExport) {
   it.spec = scClean(it.spec);
@@ -617,7 +637,11 @@ function buildScene(d, it, forExport) {
   const head = document.createElement('div'); head.className = 'gh';
   head.innerHTML = '<span></span>' + (forExport ? '' : '<span class="sbtns"><button type="button" data-s="play">เล่น</button><button type="button" data-s="reset">เริ่มใหม่</button><button type="button" data-s="slow" aria-pressed="false">ช้า</button>' + ((it.ink && it.ink.length) || (it.pics && it.pics.length) ? '<button type="button" data-s="back" title="เอาภาพเดิมกลับมาบนหน้า">คืนเป็นภาพวาด</button>' : '') + '</span>');
   head.firstChild.textContent = sp.title; d.appendChild(head);
-  const cv = document.createElement('canvas'); cv.className = 'simcv scncv'; d.appendChild(cv); r.cv = cv;
+  const cv = document.createElement('canvas'); cv.className = 'simcv scncv';
+  /* an animal is seen whole all the time (owner 22 พ.ย. 2569): its box is a place-holder (.anbox) and the canvas lies over
+     it with room all round, so a part that goes past the box is still drawn (anMargin) */
+  if (sp.animal && !forExport) { const bx = document.createElement('div'); bx.className = 'anbox'; d.appendChild(bx); cv.classList.add('anover'); r.box = bx; } else r.box = null;
+  d.appendChild(cv); r.cv = cv;
   if (!forExport && sp.domain !== 'math') {
     const tg = document.createElement('div'); tg.className = 'scntog';
     const tog = (label, get, set) => { const b = document.createElement('button'); b.type = 'button'; b.className = 'chip'; b.textContent = label; b.setAttribute('aria-pressed', get() ? 'true' : 'false'); b.onclick = () => { const live = findItem(it.id) || it; set(live.spec, !get(live.spec)); b.setAttribute('aria-pressed', get(live.spec) ? 'true' : 'false'); scRender(live, r); savePage(); }; tg.appendChild(b); };
@@ -674,7 +698,8 @@ function buildScene(d, it, forExport) {
   /* a model of orbitals, surfaces or curves can sit on the paper without its box; the box comes back from its small handle */
   const frameSwap = (v) => { const before = clone(S.page.items || []), items = clone(before), x = items.find((t) => t.id === it.id); if (!x) return; x.spec.clean = v; if (v) x.spec.pen = x.spec.pen !== false; setItems(items, before); };
   if (!forExport && !sp.bare && sp.dim === 3 && sp.domain === 'math' && !sp.clean) { const sb0 = head.querySelector('.sbtns'); const nf = document.createElement('button'); nf.type = 'button'; nf.textContent = 'ไม่มีกรอบ'; nf.title = 'วางบนกระดาษแบบไม่มีกรอบ ลงสีแบบสีไม้ ยังหมุนได้'; nf.onclick = () => frameSwap(true); sb0.appendChild(nf); }
-  if (sp.mark === 'orb') d.classList.add('orbmark'); /* an orbital drawn with the pen tool: a square around its nucleus (task 9.9) */
+  if (sp.mark === 'orb') d.classList.add('orbmark');
+  if (sp.animal) d.classList.add('animark'); if (sp.animal && typeof anFitBox === 'function') anFitBox(d, it.w); /* an animal (task 9.10): a wide box, it walks about inside */ /* an orbital drawn with the pen tool: a square around its nucleus (task 9.9) */
   if (sp.clean && !forExport) {
     d.classList.add('clean');
     const hb = document.createElement('button'); hb.type = 'button'; hb.className = 'lifedot scnhandle cleandot no-ink'; hb.title = 'ปรับแบบจำลอง'; hb.setAttribute('aria-label', 'ปรับแบบจำลอง'); hb.setAttribute('aria-expanded', r.open ? 'true' : 'false');
@@ -683,7 +708,7 @@ function buildScene(d, it, forExport) {
     const pill = document.createElement('div'); pill.className = 'scnpill cleanpill no-ink'; pill.hidden = !r.open; pill.addEventListener('pointerdown', (e) => e.stopPropagation());
     hb.onclick = (e) => { e.stopPropagation(); r.open = !r.open; pill.hidden = !r.open; hb.setAttribute('aria-expanded', r.open ? 'true' : 'false'); };
     const sb2 = head.querySelector('.sbtns');
-    sb2.querySelectorAll('[data-s="play"],[data-s="reset"],[data-s="slow"]').forEach((x) => { if (!sp.t || !sp.t.speed) x.hidden = true; });
+    sb2.querySelectorAll('[data-s="play"],[data-s="reset"],[data-s="slow"]').forEach((x) => { if (!sp.animal && (!sp.t || !sp.t.speed)) x.hidden = true; });
     const pen = document.createElement('button'); pen.type = 'button'; pen.textContent = sp.pen ? 'สีเรียบ' : 'สีไม้'; pen.onclick = () => { const before = clone(S.page.items || []), items = clone(before), x = items.find((t) => t.id === it.id); if (!x) return; x.spec.pen = !x.spec.pen; setItems(items, before); };
     const fr = document.createElement('button'); fr.type = 'button'; fr.textContent = 'แสดงกรอบ'; fr.onclick = () => frameSwap(false);
     sb2.append(pen, fr);
@@ -699,7 +724,26 @@ function buildScene(d, it, forExport) {
       }
       sb2.appendChild(cr);
     }
-    [...d.children].filter((x) => x !== cv).forEach((x) => pill.appendChild(x));
+    /* an animal (task 9.10): its colour as in nature, or one chosen here for the body; one step of undo */
+    if (sp.animal) {
+      const cr = document.createElement('div'); cr.className = 'orbcols ancols'; cr.setAttribute('role', 'group'); cr.setAttribute('aria-label', 'สีของสัตว์');
+      for (const [c1, nm] of AN_COLS) {
+        const b = document.createElement('button'); b.type = 'button'; b.title = nm; b.setAttribute('aria-label', nm); b.setAttribute('aria-pressed', (sp.col || '') === c1 ? 'true' : 'false');
+        b.innerHTML = c1 ? '<svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="8" fill="' + c1 + '" stroke="rgba(40,44,52,0.35)"/></svg>'
+          : '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 10V2a8 8 0 0 1 7.6 5.5z" fill="#A0663A"/><path d="M10 10l7.6-2.5A8 8 0 0 1 12.5 17.6z" fill="#5E9E3A"/><path d="M10 10l2.5 7.6A8 8 0 0 1 2.4 12.5z" fill="#F2B630"/><path d="M10 10L2.4 12.5A8 8 0 0 1 10 2z" fill="#4C4B52"/></svg>';
+        b.onclick = () => { const before = clone(S.page.items || []), items = clone(before), x = items.find((t) => t.id === it.id); if (!x) return; x.spec.col = c1; setItems(items, before); };
+        cr.appendChild(b);
+      }
+      sb2.appendChild(cr);
+      /* out on the paper (switch onpage): it walks over the whole page, or stays at its place as before; one step of undo */
+      if (typeof flagOn !== 'function' || flagOn('onpage')) {
+        const st = document.createElement('button'); st.type = 'button'; st.className = 'anstay'; st.textContent = sp.stay ? 'เดินทั่วหน้า' : 'อยู่กับที่';
+        st.title = sp.stay ? 'ให้ออกมาเดินบนหน้า ชนกล่องหรือเส้นแล้วหยุดหรือเลี่ยง เดินบนเส้นที่วาดได้' : 'ให้อยู่ตรงนี้ ไม่เดินไปทั่วหน้า';
+        st.onclick = () => { const before = clone(S.page.items || []), items = clone(before), x = items.find((t) => t.id === it.id); if (!x) return; if (x.spec.stay) delete x.spec.stay; else x.spec.stay = true; setItems(items, before); };
+        sb2.appendChild(st);
+      }
+    }
+    [...d.children].filter((x) => x !== cv && x !== r.box).forEach((x) => pill.appendChild(x));
     d.appendChild(hb); d.appendChild(pill);
   }
   if (sp.bare) {
@@ -720,7 +764,7 @@ function buildScene(d, it, forExport) {
     const fold = document.createElement('button'); fold.type = 'button'; fold.textContent = 'ย่อ'; fold.title = 'ย่อแถบนี้ เหลือปุ่มเล็กที่มุมภาพ'; fold.onclick = () => { r.open = false; pill.hidden = true; hb.setAttribute('aria-expanded', 'false'); };
     const del = document.createElement('button'); del.type = 'button'; del.textContent = 'ลบ'; del.onclick = () => { const live = findItem(it.id); if (!live) return; const before = clone(S.page.items || []); setItems(before.filter((t) => t.id !== it.id), before); SCN.delete(it.id); }; sb2.appendChild(del);
     sb2.appendChild(fold);
-    [...d.children].filter((x) => x !== cv).forEach((x) => pill.appendChild(x));
+    [...d.children].filter((x) => x !== cv && x !== r.box).forEach((x) => pill.appendChild(x));
     d.appendChild(hb); d.appendChild(pill);
   }
 }
@@ -1646,7 +1690,7 @@ function renderScenePicker(box, dom, q) {
   const doms = q ? SCENE_SUBJ.map((x) => x[0]) : [dom];
   let shown = 0;
   for (const d of doms) {
-    const list = (SCENE_TPL[d] || []).filter(([name, hint]) => !q || (name + ' ' + hint).toLowerCase().includes(q));
+    const list = (SCENE_TPL[d] || []).filter(([name, hint, , kw]) => !q || (name + ' ' + hint + ' ' + (kw || '')).toLowerCase().includes(q));
     if (q && list.length) { const h = document.createElement('h3'); h.textContent = (SCENE_SUBJ.find((x) => x[0] === d) || [0, ''])[1]; box.appendChild(h); }
     const grid = document.createElement('div'); grid.className = 'simgrid';
     for (const [name, hint, spec] of list) {
@@ -1802,6 +1846,8 @@ function sc3Clean(sp, o) {
   o.dim = 3;
   if (sp.clean) o.clean = true; /* no frame: the model sits on the paper like a drawing */
   if (sp.pen) o.pen = true; /* coloured as if with coloured pencils */
+  /* an animal of the curriculum (task 9.10, m/animals.js): which one, and the colour chosen for it ('' as in nature) */
+  if (typeof sp.animal === 'string' && sp.animal) { o.domain = 'bio'; o.animal = sp.animal.replace(/[^a-z0-9]/g, '').slice(0, 20); o.col = /^#[0-9a-fA-F]{6}$/.test(String(sp.col || '')) ? sp.col : ''; o.mark = 'ani'; o.params = []; if (sp.stay === true) o.stay = true; /* out on the paper or kept at its place (switch onpage) */ return o; }
   if (o.domain === 'phys') {
     const wd = sp.world || {};
     o.world = { size: scNum(wd.size, 4, 0.1, 1e9), g: scNum(wd.g, 9.8, 0, 1000), ground: wd.ground !== false, mu: scNum(wd.mu, 0.3, 0, 5), tz: scNum(wd.tz, 0, -1e9, 1e9) };
@@ -2084,6 +2130,7 @@ function pencilDraw(c, w, h, gp, rt) {
 }
 /* ----- one entry for the runtime ----- */
 function sc3Reset(sp, r) {
+  if (sp.animal) { r.st = { t: 0 }; return; }
   if (sp.domain === 'phys') {
     r.st = p3Init(sp); let mf = 0; for (const B of r.st.bodies) mf = Math.max(mf, B.b.m * sp.world.g); if (sp.fields.central) for (const B of r.st.bodies) { const d = vLen(vSub(B.p, sp.fields.central.p)); mf = Math.max(mf, sp.fields.central.GM * B.b.m / Math.max(d * d, 1e-9)); }
     if (sp.fields.B) for (const B of r.st.bodies) mf = Math.max(mf, Math.abs(B.b.q) * vLen(vCross(B.v, sp.fields.B))); for (const s of sp.springs) mf = Math.max(mf, s.k * sp.world.size * 0.3); for (const f of sp.forces) mf = Math.max(mf, vLen(f.f));
@@ -2091,13 +2138,31 @@ function sc3Reset(sp, r) {
   } else if (sp.domain === 'math') r.st = { t: sp.t.min };
   else r.st = c3Init(sp);
 }
-function sc3Tick(sp, r, dtw) {
+/* animals (task 9.10): their part is loaded the first time one is drawn; "animals" in flags.json turns it off */
+function sc3AnLoad(r) {
+  if (r.anTry) return; r.anTry = 1;
+  need('animals').then(() => { for (const [id, R] of SCN) if (R === r) { const it = findItem(id); if (it) scRender(it, r); } }, () => { r.anOff = 1; for (const [id, R] of SCN) if (R === r) { const it = findItem(id); if (it) scRender(it, r); } });
+}
+function sc3Tick(sp, r, dtw, it) {
+  if (sp.animal) {
+    if (typeof anTick !== 'function') { sc3AnLoad(r); return false; }
+    /* frameless: out on the paper (switch "onpage"), it walks over the page and its box goes with it */
+    const pm = it && typeof anPage === 'function' ? anPage(it, r, dtw * (r.slow ? 0.25 : 1)) : false;
+    if (pm) return pm === 'draw';
+    anTick(sp, r, dtw * (r.slow ? 0.25 : 1));
+    /* drawn about 30 times a second: smooth enough, and light on an iPad */
+    r.anAcc = (r.anAcc || 0) + dtw; if (r.anAcc < (r.anMs > 14 ? 0.05 : 0.03)) return false; /* a slow device: 20 a second */ r.anAcc = 0; return true;
+  }
   const sim = dtw * (sp.speed || 1) * (r.slow ? 0.25 : 1);
   if (sp.domain === 'phys') { const n = Math.max(1, Math.ceil(sim / 0.002)); for (let i = 0; i < n; i++) p3Step(sp, r.st, sim / n); for (const B of r.st.bodies) { B.trail.push(B.p.slice()); if (B.trail.length > 500) B.trail.shift(); } }
   else if (sp.domain === 'math') { r.st.t += dtw * sp.t.speed * (r.slow ? 0.25 : 1); if (r.st.t > sp.t.max) { if (sp.t.loop) { r.st.t = sp.t.min; r.traces = {}; } else { r.st.t = sp.t.max; r.playing = false; r.ended = true; } } }
   else { const s2 = dtw * (r.slow ? 0.25 : 1), n = Math.max(1, Math.ceil(s2 / 0.01)); for (let i = 0; i < n; i++) c3Step(sp, r.st, s2 / n); if (r.st.t - r.st.lastH > 0.2) { r.st.lastH = r.st.t; r.st.hist.push([r.st.t].concat(sp.species.map((_, i) => r.st.P.filter((q) => q.s === i).length))); if (r.st.hist.length > 500) r.st.hist.shift(); } }
 }
 function sc3Render(c, w, h, sp, r) {
+  if (sp.animal) {
+    if (typeof anDraw === 'function') return anDraw(c, w, h, sp, r);
+    c.fillStyle = '#5A6472'; c.font = '14px Sarabun, sans-serif'; c.fillText(r.anOff ? 'ส่วนสัตว์สามมิติปิดใช้ชั่วคราว' : 'กำลังโหลด', 16, 24); sc3AnLoad(r); r.read = []; return true;
+  }
   if (sp.domain === 'phys') {
     p3Draw(c, w, h, sp, r.st, r);
     const live = r.st.bodies.filter((B) => !B.b.fixed);
@@ -2109,12 +2174,23 @@ function sc3Render(c, w, h, sp, r) {
 }
 /* drag to turn, two fingers or the wheel to zoom, double tap to face front */
 function sc3Bind(cv, it, r) {
-  const pts = new Map(); let pinch0 = 0, zoom0 = 1, lastTap = 0; cv.style.touchAction = 'none';
+  const pts = new Map(); let pinch0 = 0, zoom0 = 1, lastTap = 0, down = null; cv.style.touchAction = 'none';
   const cam = () => r.cam || (r.cam = Object.assign({}, CAM0));
   const redraw = () => { if (!r.playing) scRender(findItem(it.id) || it, r); };
-  cv.addEventListener('pointerdown', (e) => { e.stopPropagation(); try { cv.setPointerCapture(e.pointerId); } catch (x) { /* fine */ } if (e.isPrimary) for (const [k, v] of pts) if (v[2] === e.pointerType) pts.delete(k); /* a first finger: no other finger is still down (task 9.9) */ pts.set(e.pointerId, [e.clientX, e.clientY, e.pointerType]); if (pts.size === 2) { const [a, b] = [...pts.values()]; pinch0 = Math.hypot(a[0] - b[0], a[1] - b[1]); zoom0 = cam().zoom; } const t = now(); if (pts.size === 1 && t - lastTap < 320) { r.cam = Object.assign({}, CAM0); redraw(); } lastTap = t; });
+  cv.addEventListener('pointerdown', (e) => { e.stopPropagation(); try { cv.setPointerCapture(e.pointerId); } catch (x) { /* fine */ } if (e.isPrimary) for (const [k, v] of pts) if (v[2] === e.pointerType) pts.delete(k); /* a first finger: no other finger is still down (task 9.9) */ pts.set(e.pointerId, [e.clientX, e.clientY, e.pointerType]); down = pts.size === 1 ? [e.clientX, e.clientY, now(), e.pointerId] : null; if (pts.size === 2) { const [a, b] = [...pts.values()]; pinch0 = Math.hypot(a[0] - b[0], a[1] - b[1]); zoom0 = cam().zoom; } const t = now(); if (pts.size === 1 && t - lastTap < 320) { r.cam = Object.assign({}, CAM0); redraw(); } lastTap = t; });
   cv.addEventListener('pointermove', (e) => { if (!pts.has(e.pointerId)) return; e.stopPropagation(); const p0 = pts.get(e.pointerId), dx = e.clientX - p0[0], dy = e.clientY - p0[1]; pts.set(e.pointerId, [e.clientX, e.clientY, e.pointerType]); const c = cam(); if (pts.size >= 2) { const [a, b] = [...pts.values()]; if (pinch0) c.zoom = clamp(zoom0 * Math.hypot(a[0] - b[0], a[1] - b[1]) / pinch0, 0.4, 4); } else { c.yaw -= dx * 0.009; c.pitch = clamp(c.pitch + dy * 0.009, -1.5707, 1.5707); } redraw(); });
   const up = (e) => { pts.delete(e.pointerId); if (pts.size < 2) pinch0 = 0; }; cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', up);
+  /* an animal (task 9.10): a tap (not a drag that turns it) and it answers the way the real one does */
+  cv.addEventListener('pointerup', (e) => {
+    const d0 = down; down = null; if (!d0 || d0[3] !== e.pointerId || pts.size) return;
+    if (Math.hypot(e.clientX - d0[0], e.clientY - d0[1]) > 10 || now() - d0[2] > 450) return;
+    const live = findItem(it.id) || it; if (!live.spec || !live.spec.animal || typeof anTap !== 'function') return;
+    const rc = cv.getBoundingClientRect(), m = r.box && r.anM ? r.anM : [0, 0], x = (e.clientX - rc.left) * (cv.clientWidth / (rc.width || 1)) - m[0], y = (e.clientY - rc.top) * (cv.clientHeight / (rc.height || 1)) - m[1];
+    const bw = r.box && r.anM ? r.box.clientWidth : cv.clientWidth, bh = r.box && r.anM ? r.box.clientHeight : cv.clientHeight; /* an animal: the size of its box, the canvas lies over it with room round it */
+    if (!anTap(live.spec, r, x, y, bw, bh)) return;
+    if (!r.playing) { r.playing = true; const pb = itemsEl.querySelector('.item[data-id="' + it.id + '"] [data-s="play"]'); if (pb) pb.textContent = 'หยุด'; }
+    if (!scnRaf) scnRaf = requestAnimationFrame(scTick);
+  });
   cv.addEventListener('wheel', (e) => { e.preventDefault(); e.stopPropagation(); const c = cam(); c.zoom = clamp(c.zoom * Math.exp(-e.deltaY * 0.0015), 0.4, 4); redraw(); }, { passive: false });
 }
 const SCENE_TPL3 = [
