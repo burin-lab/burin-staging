@@ -353,12 +353,13 @@ async function hwPageImage(pid) {
     W = pw; H = ph; c.fillStyle = '#FFFFFF'; c.fillRect(0, 0, W, H); paper(c, page.paper || 'grid');
     let ink = c, ci = null;
     if (bgs.length) { ci = document.createElement('canvas'); ci.width = cv.width; ci.height = cv.height; ci.style.cssText = cv.style.cssText; ink = ci.getContext('2d'); ink.setTransform(k, 0, 0, k, 0, 0); }
-    drawInto(ink, strokes, null); [W, H] = keep;
+    const sp = typeof inkSplitItems === 'function' ? inkSplitItems(page.items, strokes) : [strokes, []];
+    drawInto(ink, sp[0], null); [W, H] = keep;
     pg.appendChild(cv);
     if (bgs.length) { const bl = document.createElement('div'); bl.style.cssText = 'position:absolute;left:0;top:0;width:' + pw + 'px;height:' + ph + 'px'; for (const it of bgs) bl.appendChild(buildItemEl(it, true)); pg.appendChild(bl); pg.appendChild(ci); }
     const its = document.createElement('div'); its.style.cssText = 'position:absolute;left:0;top:0;width:' + pw + 'px;height:' + ph + 'px';
     for (const it of page.items || []) if (!isUnderItem(it)) its.appendChild(buildItemEl(it, true));
-    pg.appendChild(its); host.appendChild(pg);
+    pg.appendChild(its); { const tc = sp[1].length ? inkTopCanvas(sp[1], pw, ph, k) : null; if (tc) pg.appendChild(tc); } host.appendChild(pg);
     for (const im of pg.querySelectorAll('img')) { if (!im.complete) await new Promise((r) => { im.onload = r; im.onerror = r; setTimeout(r, 6000); }); }
     await typeset(its); if (document.fonts && document.fonts.ready) await document.fonts.ready;
     const shot = await window.html2canvas(pg, { scale: k, backgroundColor: '#FFFFFF', logging: false, useCORS: true });
