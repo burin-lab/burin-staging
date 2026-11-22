@@ -47,12 +47,13 @@ function anIK(H, F, l1, l2, hint) {
    g (coloured, may be pencil), gs (sharp: eyes, so they stay bright) ----- */
 class AnB {
   constructor(g, gs, P, E, pen) {
-    this.g = g; this.gs = gs; this.P = P; this.E = E; this.pen = pen; this.M = AN_I; this.T = [0, 0, 0]; this.st = []; this.clip = false;
+    this.g = g; this.gs = gs; this.P = P; this.E = E; this.pen = pen; this.M = AN_I; this.T = [0, 0, 0]; this.st = []; this.clip = false; this.sc = 1;
     const V = anUnit(E); this.V = V; this.Lt = anUnit(anAdd(V, [0.3, -0.2, 0.75]));
     this.ec = pen ? 'rgba(40,44,56,0.95)' : 'rgba(36,40,50,0.8)'; this.n = 0;
   }
-  push(t, M) { this.st.push([this.M, this.T]); this.T = this.w(t || [0, 0, 0]); if (M) this.M = anMm(this.M, M); }
-  pop() { const s = this.st.pop(); this.M = s[0]; this.T = s[1]; }
+  /* sc: a part drawn bigger or smaller (a cat's head on a lion), its eyes and lines too */
+  push(t, M, sc) { this.st.push([this.M, this.T, this.sc]); this.T = this.w(t || [0, 0, 0]); if (M) this.M = anMm(this.M, M); if (sc) { this.M = anMm(this.M, [sc, 0, 0, 0, sc, 0, 0, 0, sc]); this.sc *= sc; } }
+  pop() { const s = this.st.pop(); this.M = s[0]; this.T = s[1]; this.sc = s[2]; }
   w(p) { const q = anMv(this.M, p); return [this.T[0] + q[0], this.T[1] + q[1], this.T[2] + q[2]]; }
   d(v) { return anMv(this.M, v); }
   shade(col, n) {
@@ -147,15 +148,15 @@ class AnB {
   line(pts, col, wd, o) {
     const W = pts.map((p) => this.w(p)), mid = W[Math.floor(W.length / 2)], k = this.P(mid[0], mid[1], mid[2])[3];
     if (this.clip && mid[2] < -0.004) return;
-    this.g.line(W, col || this.ec, Math.max(0.8, (wd || 0.01) * k), o);
+    this.g.line(W, col || this.ec, Math.max(0.8, (wd || 0.01) * this.sc * k), o);
   }
   /* an eye: a dark ball with its shine, only when it faces us (out is the way it looks out of the head) */
   eye(p, r, out, col) {
     const w = this.w(p), o = this.d(out || [1, 0, 0]); if (anDot(o, anSub(this.E, w)) < -0.15 * anLen(anSub(this.E, w))) return;
     if (this.clip && w[2] < 0) return;
-    this.gs.ball(w, r, col || '#17191E');
+    this.gs.ball(w, r * this.sc, col || '#17191E');
   }
-  ball(p, r, col) { const w = this.w(p); if (this.clip && w[2] < 0) return; this.g.ball(w, r, col); }
+  ball(p, r, col) { const w = this.w(p); if (this.clip && w[2] < 0) return; this.g.ball(w, r * this.sc, col); }
 }
 
 /* ----- a life in a loop: each animal has its steps (move somewhere, then do something there), and an answer to a tap.
@@ -166,8 +167,17 @@ function anNew(D) {
   if (D.start) D.start(s);
   return s;
 }
-function anRoam(D, p) { const r = Math.hypot(p[0], p[1]), m = D.roam * 1.2; return r > m ? [p[0] * m / r, p[1] * m / r] : p; }
+/* out on the paper (frameless, switch "onpage"): set while such an animal takes its steps. Its ground has no edge, and
+   it heads along the page, left or right, the way AN_FREE.dir says */
+let AN_FREE = null;
+function anRoam(D, p) { if (AN_FREE) return p; const r = Math.hypot(p[0], p[1]), m = D.roam * 1.2; return r > m ? [p[0] * m / r, p[1] * m / r] : p; }
+const anFar = (D, s) => !AN_FREE && Math.hypot(s.x, s.y) > D.roam;
 function anTarget(D, s) {
+  if (AN_FREE) {
+    const F = AN_FREE; if (anRng(s) < 0.2) F.dir = -F.dir;
+    const L = D.roam * (1.5 + 2 * anRng(s)), sd = (anRng(s) - 0.5) * 0.4 * D.roam, R = F.R;
+    return [s.x + R[0] * L * F.dir - R[1] * sd, s.y + R[1] * L * F.dir + R[0] * sd].concat(D.go === 'fly' || D.go === 'swim' ? [D.zLo + (D.zHi - D.zLo) * anRng(s)] : []);
+  }
   for (let k = 0; k < 6; k++) {
     const a = anRng(s) * 6.2832, r = D.roam * (0.3 + 0.7 * Math.sqrt(anRng(s))), p = [r * Math.cos(a), r * Math.sin(a)];
     if (Math.hypot(p[0] - s.x, p[1] - s.y) > D.roam * 0.45) return p.concat(D.go === 'fly' || D.go === 'swim' ? [D.zLo + (D.zHi - D.zLo) * anRng(s)] : []);
@@ -210,13 +220,13 @@ function anHopTo(D, s, dt, tg, spd, big) {
   s.hop = { u: 0, a: [s.x, s.y, 0], b: [b[0], b[1], 0], len, T: (big ? 1.25 : 1) * (D.hopT || 0.45), H: (big ? D.jumpH : D.hopH) || 0.2 };
   return false;
 }
-function anNext(D, s) { s.si = (s.si + 1) % D.loop.length; s.aT = 0; s.ap = 0; s.tg = null; s.act = D.loop[s.si][0]; if (D.enter) D.enter(s, s.act); }
+function anNext(D, s) { s.si = (s.si + 1) % D.loop.length; s.porg = null; s.aT = 0; s.ap = 0; s.tg = null; s.act = D.loop[s.si][0]; if (D.enter) D.enter(s, s.act); }
 function anStep(D, s, dt) {
   s.t += dt;
   if (s.rx) anRx1(D, s, dt);
   else if (D.air && s.z > 0.002) {
     /* came back from flying off: glides down to a spot on the ground */
-    if (!s.landTg) { const p = anTarget(D, s); s.landTg = [p[0] * 0.6, p[1] * 0.6, 0]; }
+    if (!s.landTg) { const p = anTarget(D, s), k = AN_FREE ? 1 : 0.6; s.landTg = [p[0] * k, p[1] * k, 0]; }
     const save = D.go; D.go = 'fly'; anMove(D, s, dt, s.landTg, D.fast * 0.7); D.go = save;
     if (s.z < 0.02 && Math.hypot(s.landTg[0] - s.x, s.landTg[1] - s.y) < 0.06) { s.z = 0; s.vz = 0; s.landTg = null; s.v = 0; }
     s.act = 'land';
@@ -226,9 +236,9 @@ function anStep(D, s, dt) {
     else if (act === 'go' || act === 'fly' || act === 'run') {
       if (!s.tg) s.tg = anTarget(D, s);
       const done = anMove(D, s, dt, s.tg, act === 'run' ? D.fast : D.spd);
-      if ((done && !s.hop) || s.aT > dur) { if (D.go === 'hop' && s.hop) { /* lands first */ } else anNext(D, s); }
+      if ((done && !s.hop) || s.aT > dur * (AN_FREE ? 2.5 : 1)) { if (D.go === 'hop' && s.hop) { /* lands first */ } else anNext(D, s); }
     } else if (act === 'land' || act === 'hang') {
-      const p = D.perch(s); const there = anMove(D, s, dt, p, D.spd * 0.8);
+      let p = D.perch(s); if (AN_FREE) { if (!s.porg) s.porg = [s.x - p[0], s.y - p[1]]; p = [p[0] + s.porg[0], p[1] + s.porg[1], p[2]]; } const there = anMove(D, s, dt, p, D.spd * 0.8);
       if (there) { s.x += (p[0] - s.x) * Math.min(1, 6 * dt); s.y += (p[1] - s.y) * Math.min(1, 6 * dt); s.z += (p[2] - s.z) * Math.min(1, 6 * dt); s.perched = true; } else { s.perched = false; s.aT = Math.min(s.aT, dur * 0.2); }
       if (s.aT >= dur) { s.perched = false; anNext(D, s); }
     } else { anMove(D, s, dt, null); if (s.aT >= dur && !s.hop) anNext(D, s); }
@@ -294,7 +304,7 @@ function anLegs(b, s, Q, body, col, foot, k) {
     let fx = x0 + A * Math.sin(p), fz = lift * Math.max(0, Math.cos(p)), fy = side * Q.fy;
     if (!front && k.sit) { fx = x0 + 0.1 * k.sit + (1 - k.sit) * (fx - x0); fz *= 1 - k.sit; }
     if (k.tuck) { fx = x0 + (fx - x0) * (1 - k.tuck) + (front ? -0.05 : 0.05) * k.tuck; fy *= 1 - 0.3 * k.tuck; }
-    const F = [fx, fy, fz + (k.lift || 0)], l = Q.l1, knee = anIK(hip, F, l, Q.l2, front ? [1, 0, 0.1] : [-1, 0, 0.1]);
+    const fl = front ? (Q.fl || 1) : 1, F = [fx, fy, fz + (k.lift || 0)], l = Q.l1 * fl, knee = anIK(hip, F, l, Q.l2 * fl, front ? [1, 0, 0.1] : [-1, 0, 0.1]);
     b.tube([hip, knee, F], (t) => (t < 0.5 ? Q.lr - (Q.lr - Q.lr2) * t * 0.8 : Q.lr2 * (1.06 - 0.12 * t)), col, { sides: 7 });
     if (foot) b.ell([F[0] + Q.hoof * 0.15, F[1], F[2] + Q.hoof * 0.5], [Q.hoof * 1.1, Q.hoof * 0.95, Q.hoof * 0.6], null, foot, { n1: 5, n2: 8 });
   }
@@ -308,13 +318,16 @@ function anQuad(b, s, C, D) {
   const bp = -0.42 * sit, piv = [Q.fx, 0, Q.fz];
   /* the body, pitched about the shoulders when it sits */
   const body = (p) => { const q = anMv(anRy(bp), anSub(p, piv)); return anAdd(piv, [q[0], q[1], q[2] + bob + arch * 0.06]); };
-  const bodyM = anRy(bp), cb = (u) => (u[2] < -0.42 ? C.b2 : (Q.spots && Math.sin(u[0] * 9 + 1.3) * Math.sin(u[1] * 7 + u[2] * 5) > 0.42 ? C.s : C.b));
+  const bodyM = anRy(bp), cb = Q.coat ? (u) => Q.coat(u, C) : (u) => (u[2] < -0.42 ? C.b2 : (Q.spots && Math.sin(u[0] * 9 + 1.3) * Math.sin(u[1] * 7 + u[2] * 5) > 0.42 ? C.s : C.b));
+  /* a pangolin rolls up in a ball of scales */
+  if (Q.ball && rxk === 'hide' && rk > 0.5) { const r = Q.bx * 0.7; b.ell([0, 0, r], [r * 1.05, r, r], null, cb, { n1: 10, n2: 12 }); if (Q.spines) for (let i = 0; i < 60; i++) { const th = Math.acos(1 - (i + 0.5) / 60 * 1.7), ph = i * 2.4, u = [Math.sin(th) * Math.cos(ph), Math.sin(th) * Math.sin(ph), Math.cos(th)]; b.line([[u[0] * r, u[1] * r, r + u[2] * r], [u[0] * r * 1.7, u[1] * r * 1.7, r + u[2] * r * 1.7]], i % 3 ? '#E8DCC0' : '#2A221C', 0.004); } return; }
   const archDef = (u) => [0, 0, u[2] > 0 ? arch * 0.08 * (1 - u[0] * u[0]) : 0];
   b.ell(body([0, 0, Q.zh]), [Q.bx, Q.by, Q.bz], bodyM, cb, { def: archDef, n1: 12, n2: 14 });
   b.ell(body([Q.bx * 0.55, 0, Q.zh + Q.bz * 0.08]), [Q.bx * 0.5, Q.by * 0.95, Q.bz * 1.02], bodyM, cb, { n1: 7, n2: 10 });
   b.ell(body([-Q.bx * 0.58, 0, Q.zh + Q.bz * 0.06]), [Q.bx * 0.48, Q.by * 0.92, Q.bz * 0.98], bodyM, cb, { n1: 7, n2: 10 });
   if (Q.udder) b.ell(body([-Q.bx * 0.45, 0, Q.zh - Q.bz * 0.9]), [0.07, 0.06, 0.05], null, C.m, { n1: 5, n2: 8 });
-  anLegs(b, s, Q, body, (u) => C.b, C.d, { sit, tuck: arch * 0.4 });
+  if (Q.extra) Q.extra(b, s, C, D, body, bodyM);
+  anLegs(b, s, Q, body, Q.legCol ? (u) => Q.legCol(C) : (u) => C.b, C.d, { sit, tuck: arch * 0.4 });
   /* neck and head: up while it walks, down to the ground to graze (or to sniff), turning while it looks round */
   let na = Q.na + (Q.naD - Q.na) * graze + 0.35 * sit, ha = Q.ha + (Q.haD - Q.ha) * graze - 0.25 * sit, hy = look;
   if (rxk === 'flee' || rxk === 'threat') { na += 0.25 * rk; ha -= 0.3 * rk; }
@@ -442,23 +455,28 @@ function anDraw(c, w, h, sp, r) {
   if (!D) { c.fillStyle = '#5A6472'; c.font = '14px Sarabun, sans-serif'; c.fillText('ไม่รู้จักสัตว์ชนิดนี้', 16, 24); return true; }
   const s = r.st.an || (r.st.an = anNew(D)), t0 = performance.now();
   if (!AN_PEN) { try { AN_PEN = MODEV.scene ? MODEV.scene('pencilTex') : null; } catch (e) { AN_PEN = null; } }
-  const R = D.R || 1.1, tz = D.tz || 0, P = cam3(r, w, h, R, tz), cm = r.cam || CAM0, Dd = R * 3.2 / (cm.zoom || 1);
+  const R = D.R || 1.1, tz = D.tz || 0, cm = r.cam || CAM0, Dd = R * 3.2 / (cm.zoom || 1), P0 = cam3(r, w, h, R, tz);
   const E = [Math.sin(cm.yaw) * Math.cos(cm.pitch) * Dd, -Math.cos(cm.yaw) * Math.cos(cm.pitch) * Dd, Math.sin(cm.pitch) * Dd + tz];
+  /* out on the paper: the view goes with the animal (its box moves on the page), no patch of ground under it */
+  const pg = r.pg && !sp.thumb ? r.pg : null, ox = pg ? s.x : 0, oy = pg ? s.y : 0, P = pg ? (x, y, z) => P0(x - ox, y - oy, z) : P0;
+  if (pg) { E[0] += ox; E[1] += oy; }
   const pen = !!sp.pen, C = anColors(D, sp), g = new G3(P), gs = new G3(P), b = new AnB(g, gs, P, E, pen);
   /* in pencil on the paper (no frame), the grain goes straight onto this canvas while only the animal is on it, and the
      ground and shadow go in under it afterwards: no second canvas to fill and copy every frame (owner 21 พ.ย. 2569: it lagged) */
-  const direct = pen && AN_PEN && sp.clean, under = () => {
-    if (D.ground) D.ground(c, P, s, C, D);
+  const direct = pen && AN_PEN && sp.clean, under = sp.thumb ? () => {} : () => {
+    if (D.ground && !pg) D.ground(c, P, s, C, D);
     if (D.sh && !s.hidden) anShadow(c, P, s.x, s.y, Math.max(0, s.z), D.sh[0] * (s.shk || 1), D.sh[1] * (s.shk || 1), s.h);
   };
   if (!direct) under();
-  if (D.props) D.props(b, s, C);
+  /* on the paper its flower, branch or stump is there only while it sits on it */
+  if (D.props && !(sp.thumb && D.props === anGrassField) && (!pg || s.porg)) { if (pg) b.push([s.porg[0], s.porg[1], 0]); D.props(b, s, C); if (pg) b.pop(); }
   b.clip = !!D.clip;
-  if (!s.hidden) { b.push([s.x, s.y, s.z], anRz(s.h)); D.draw(b, s, C, D); b.pop(); }
+  if (!s.hidden) { const tl = pg && pg.sl ? pg.sl * Math.cos(s.h - cm.yaw) : 0; b.push([s.x, s.y, s.z], tl ? anMm(anRz(s.h), anRy(-tl)) : anRz(s.h)); D.draw(b, s, C, D); b.pop(); }
   for (const q of s.ink) { const u = q.t / 3.2, p = anAdd(q.p, anMul(q.v, Math.min(q.t, 1.6))); gs.L.push({ t: 'b', d: P(p[0], p[1], p[2])[2] - 1e-4, q: P(p[0], p[1], p[2]), r: Math.max(2, q.r * (1 + u * 2.5) * P(p[0], p[1], p[2])[3]), col: 'rgba(30,30,40,' + (0.32 * (1 - u)).toFixed(2) + ')', ink: 1 }); }
   if (direct) { g.draw(c); anGrain(c, g, r); c.save(); c.globalCompositeOperation = 'destination-over'; under(); c.restore(); }
   else if (pen && AN_PEN) anPencil(c, g, r); else g.draw(c);
   anSharp(c, gs);
+  if (r.box && r.anM && !sp.thumb) { const bx = anClip(c.canvas, w, h, [g, gs], s, P, D, r.anM, !pg), q = P(s.x, s.y, 0), q0 = q[0]; if (pg && bx) { pg.ext = [bx[0] - q0, bx[1] - q0]; pg.headH = Math.max(0, q[1] - bx[2] - Math.max(0, s.z) * q[3]); } }
   const doing = s.rx ? (D.acts[s.rx.k] || D.acts.flee) : (D.acts[s.act] || '');
   /* the menu of the box shows the first two: the animal with its group, and the trait exam questions ask about */
   r.read = [['สัตว์', D.th + ' (' + D.grp + ')']]; if (D.fact) r.read.push(['จุดเด่น', D.fact]); r.read.push(['กำลัง', doing]);
@@ -500,11 +518,187 @@ function anTick(sp, r, dt) { const D = AN[sp.animal]; if (!D) return; const s = 
 /* a tap at (x, y) on the canvas: the animal answers, away from the finger */
 function anTap(sp, r, x, y, w, h) {
   const D = AN[sp.animal]; if (!D || !r.st) return false; const s = r.st.an || (r.st.an = anNew(D));
-  const P = cam3(r, w, h, D.R || 1.1, D.tz || 0), q = P(s.x, s.y, s.z + 0.15), cm = r.cam || CAM0;
+  const P = cam3(r, w, h, D.R || 1.1, D.tz || 0), q = r.pg ? P(0, 0, s.z + 0.15) : P(s.x, s.y, s.z + 0.15), cm = r.cam || CAM0;
   let dx = q[0] - x, dy = q[1] - y; if (Math.hypot(dx, dy) < 4) { dx = Math.cos(s.h + 2.4); dy = Math.sin(s.h + 2.4); }
   /* on the screen to on the ground: right is (cos yaw, sin yaw), up the screen is away from the viewer */
   const cy = Math.cos(cm.yaw), sy = Math.sin(cm.yaw), d = [dx * cy + dy * sy, dx * sy - dy * cy];
   return anReact(D, s, d);
+}
+
+/* ----- out on the paper (owner 22 พ.ย. 2569, switch "onpage"): a frameless animal walks over the whole page. Its box goes
+   with it (the box is only the canvas round the animal); the page is seen from the side: what holds it up is the top of a
+   box, a line of ink, or the level where it was put down; the side of a box or a steep line stops it and it turns back;
+   flyers and swimmers go over what is low enough; two animals that meet answer each other. Nothing is saved while it
+   walks: where it is goes with the page the next time the page is saved for another reason ----- */
+const AN_PAGE = new Map();
+let AN_ENV = null;
+function anPageOn(sp) { return !!(sp && sp.clean && !sp.stay && !sp.thumb && (typeof flagOn !== 'function' || flagOn('onpage'))); }
+/* everything on the page an animal can stand on or bump into, as segments; built again at most twice a second, and only
+   when the lines or the boxes changed */
+function anEnvSig() {
+  let n = 0, a = 0; for (const r of allStrokes()) { const p = r.s.p || []; n++; a = (a * 31 + p.length + (p[0] | 0) + (p[1] | 0)) % 2147483647; }
+  let b = 0; for (const it of visibleItems()) { if (AN_PAGE.has(it.id)) continue; b = (b * 17 + Math.round((it.x || 0) + (it.y || 0) * 3 + (it.w || 0) * 7)) % 2147483647; }
+  return n + ':' + a + ':' + b + ':' + S.pid + ':' + visibleItems().length;
+}
+let AN_ENVT = 0;
+function anEnv(dt) {
+  /* a line or a box added or taken away, or another page: at once; else looked at again every half second of the
+     animals' time (so a test that drives it is the same every run) */
+  let n = S.mine.length + visibleItems().length; for (const k in S.others) n += S.others[k].length;
+  AN_ENVT += dt; if (AN_ENV && AN_ENVT < 0.5 && AN_ENV.n === n && AN_ENV.pid === S.pid) return AN_ENV;
+  AN_ENVT = 0; const t = performance.now(), sig = anEnvSig(); if (AN_ENV && AN_ENV.sig === sig) return AN_ENV;
+  const L = [], on = new Set();
+  /* lines of ink: every few points, with the box of each line to skip it quickly */
+  for (const r of allStrokes()) {
+    const st = r.s, p = st.p || []; if (st.on) { on.add(st.on); if (AN_PAGE.has(st.on)) continue; }
+    if (p.length < 6) continue; const seg = []; let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9, px = p[0] / 10, py = p[1] / 10;
+    const step = p.length > 900 ? 9 : p.length > 180 ? 6 : 3; /* every point of a short line (its corners), every second or third of a long one */
+    for (let i = step; ; i += step) { const j = Math.min(i, p.length - 3), x = p[j] / 10, y = p[j + 1] / 10; if (Math.hypot(x - px, y - py) > 0.5) { seg.push([px, py, x, y]); px = x; py = y; } if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; if (j >= p.length - 3) break; }
+    const f0 = p[0] / 10, g0 = p[1] / 10; x0 = Math.min(x0, f0); x1 = Math.max(x1, f0); y0 = Math.min(y0, g0); y1 = Math.max(y1, g0);
+    if (seg.length) L.push({ b: [x0, y0, x1, y1], seg });
+  }
+  /* boxes: their top to stand on and their sides to bump into (a text box only where its words are) */
+  const R = [];
+  for (const it of visibleItems()) {
+    if (AN_PAGE.has(it.id) || isBgItem(it) || it.type === 'life' || (it.spec && (it.spec.bare || it.spec.clean))) continue;
+    const el = itemsEl.querySelector('[data-id="' + it.id + '"]'); if (!el || el.hidden || !el.offsetHeight) continue;
+    const b = !it.type || it.type === 'text' ? tightItemBox(it) : itemBox(it); if (b[2] - b[0] < 4 || b[3] - b[1] < 4) continue;
+    R.push({ id: it.id, b, seg: [[b[0], b[1], b[2], b[1]], [b[0], b[1], b[0], b[3]], [b[2], b[1], b[2], b[3]]] });
+  }
+  AN_ENV = { t, sig, L, R, on, n, pid: S.pid }; return AN_ENV;
+}
+/* the segments near x0..x1 (and the boxes the animal is not standing inside) */
+function anEnvNear(E, x0, x1, skip) {
+  const out = []; for (const l of E.L) if (l.b[2] >= x0 && l.b[0] <= x1) for (const q of l.seg) out.push(q);
+  for (const o of E.R) if (!skip.has(o.id) && o.b[2] >= x0 && o.b[0] <= x1) for (const q of o.seg) out.push(q);
+  return out;
+}
+/* the highest thing under x from height top down to lim, and its slope; null if nothing */
+function anSupport(segs, x, top, lim) {
+  let best = null, sl = 0;
+  for (const q of segs) {
+    const a = Math.min(q[0], q[2]), b = Math.max(q[0], q[2]); if (x < a || x > b || b - a < 0.01) continue;
+    const y = q[1] + (q[3] - q[1]) * (x - q[0]) / (q[2] - q[0]); if (y < top || y > lim) continue;
+    if (best == null || y < best) { best = y; sl = (q[3] - q[1]) / (q[2] - q[0]); }
+  }
+  return best == null ? null : [best, sl];
+}
+/* does a level line at height y from x0 to x1 cross anything (with steep: only what is steeper than that) */
+function anHits(segs, x0, x1, y, steep) {
+  const a = Math.min(x0, x1), b = Math.max(x0, x1);
+  for (const q of segs) {
+    if ((q[1] - y) * (q[3] - y) > 0 || q[1] === q[3]) continue;
+    if (steep && Math.abs(q[3] - q[1]) < steep * Math.abs(q[2] - q[0])) continue; /* only a wall: steeper than this */
+    const x = q[0] + (q[2] - q[0]) * (y - q[1]) / (q[3] - q[1]); if (x >= a && x <= b) return true;
+  }
+  return false;
+}
+/* only the animal and its shadow take a finger or the pen (with a frame, the box too): round it everything goes through to
+   the page (a clip of the canvas, which is bigger than the box; out on the paper the box itself takes nothing, .onpage) */
+function anClip(cv, w, h, gl, s, P, D, M, box) {
+  let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+  const add = (x, y, m) => { if (x - m < x0) x0 = x - m; if (x + m > x1) x1 = x + m; if (y - m < y0) y0 = y - m; if (y + m > y1) y1 = y + m; };
+  for (const g of gl) for (const e of g.L) { if (e.t === 'p') for (const q of e.q) add(q[0], q[1], 2); else if (e.t === 'l') { add(e.a[0], e.a[1], e.lw); add(e.b[0], e.b[1], e.lw); } else if (e.t === 'b') add(e.q[0], e.q[1], e.r + 1); }
+  if (D.sh) { const q = P(s.x, s.y, 0); add(q[0], q[1], D.sh[0] * q[3] + 2); }
+  if (x1 < x0) { x0 = w / 2 - 20; x1 = w / 2 + 20; y0 = h / 2 - 20; y1 = h / 2 + 20; }
+  const ext = [x0, x1, y0, y1];
+  /* in its box (with a frame, or kept at its place): the whole box still takes a finger as before (to turn it), and the
+     animal where it goes past it */
+  if (box) { x0 = Math.min(x0, 0); y0 = Math.min(y0, 0); x1 = Math.max(x1, w); y1 = Math.max(y1, h); }
+  const W2 = w + M[0] + M[2], H2 = h + M[1] + M[3]; x0 += M[0]; x1 += M[0]; y0 += M[1]; y1 += M[1];
+  const m = 8, v = [Math.max(0, y0 - m), Math.max(0, W2 - x1 - m), Math.max(0, H2 - y1 - m), Math.max(0, x0 - m)].map((x) => Math.floor(x / 4) * 4);
+  const k = v.join(); if (cv._clip === k) return ext; cv._clip = k;
+  const css = 'inset(' + v.map((x) => x + 'px').join(' ') + ')'; cv.style.clipPath = css; cv.style.webkitClipPath = css;
+  return ext;
+}
+function anUnclip(r) { const cv = r.cv; if (!cv) return; const el = cv.closest('.item'); if (el) el.classList.remove('onpage'); }
+/* one tick of an animal out on the paper: 'draw' or 'skip' (this frame not drawn); false when it is not one (then it
+   lives in its box as before) */
+function anPage(it, r, dt) {
+  const sp = it.spec, D = AN[sp.animal]; if (!D || !r.st) return false;
+  if (!anPageOn(sp) || !r.cv || !r.cv.isConnected || (AN_ENV && AN_ENV.on.has(it.id))) {
+    if (r.pg) { r.pg = null; r.st.an = null; } AN_PAGE.delete(it.id); anUnclip(r); return false;
+  }
+  const el = r.cv.closest('.item'); if (!el) return false; if (!el.classList.contains('onpage')) el.classList.add('onpage');
+  const bx = r.box || r.cv, s = r.st.an || (r.st.an = anNew(D)), cm = r.cam || CAM0, cw = bx.clientWidth, ch = bx.clientHeight; if (!cw || !ch) return false;
+  const P = cam3(r, cw, ch, D.R || 1.1, D.tz || 0), o = P(0, 0, 0), k = o[3], fx0 = bx.offsetLeft + o[0], fy0 = bx.offsetTop + o[1];
+  let pg = r.pg;
+  /* put down, moved, undone or come back from another device: it stands where its box now is */
+  if (!pg || pg.lx !== it.x || pg.ly !== it.y) {
+    pg = r.pg = { dir: Math.cos(s.h - cm.yaw) >= 0 ? 1 : -1, fx: it.x + fx0, fy: it.y + fy0, vy: 0, sl: 0, hold: 0, bt: 0, meet: {}, face: null };
+    pg.floor = pg.fy; pg.land = 1; pg.at = [it.x, it.y]; /* where it was put down */ if (s.perched && !s.porg) s.porg = [s.x, s.y];
+  }
+  pg.R = [Math.cos(cm.yaw), Math.sin(cm.yaw)];
+  AN_PAGE.set(it.id, { it, r, D, s, pg, k, w: cw, h: ch, t: performance.now() });
+  /* picked, or its handles out: it waits */
+  if (el.classList.contains('picked') || el.classList.contains('hkon') || (S.sel && S.sel.items && S.sel.items.includes(it.id))) return 'skip';
+  const E = anEnv(dt), zb = s.z, fb = pg.fy, x0 = s.x, y0 = s.y, step = 0.02, n = Math.max(1, Math.ceil(dt / step));
+  AN_FREE = pg; try { for (let i = 0; i < n; i++) anStep(D, s, dt / n); } finally { AN_FREE = null; }
+  const stepUp = Math.max(4, ch * 0.1), body = ch * 0.3, air = (D.go === 'fly' || D.go === 'swim' || (D.air && !s.hop)) && s.z > 0.02, zp = air ? s.z * k : 0;
+  let dx = ((s.x - x0) * pg.R[0] + (s.y - y0) * pg.R[1]) * k;
+  if (pg.hold > 0) { pg.hold -= dt; dx = 0; s.v = 0; if (pg.face != null) s.h = anAng(s.h + anCl(anAng(pg.face - s.h), -4 * dt, 4 * dt)); }
+  /* what bumps is the front of the animal (its nose, or its tail going backwards), not the middle of its feet (owner
+     22 พ.ย. 2569: it walked half into a line before it stopped); from the last picture of it */
+  const nx = pg.fx + dx, ex = pg.ext || [-cw * 0.25, cw * 0.25], sg = dx >= 0 ? 1 : -1, front = anCl(sg > 0 ? ex[1] : -ex[0], 4, cw * 0.48) * sg;
+  /* the boxes it stands in front of (put down over them) do not stop it */
+  const skip = new Set(); for (const q of E.R) if (pg.fx > q.b[0] && pg.fx < q.b[2] && pg.fy - zp > q.b[1] + stepUp && pg.fy - zp - body < q.b[3]) skip.add(q.id);
+  const segs = anEnvNear(E, Math.min(pg.fx, nx + front) - 2, Math.max(pg.fx, nx + front) + 2, skip), fe = pg.fy - zp;
+  let blocked = (nx + front < 4 && dx < 0) || (nx + front > W - 4 && dx > 0), sup = null;
+  if (!blocked && Math.abs(dx) > 1e-4) {
+    /* the feet trip on what is higher than a step; the nose (or tail) stops at a wall: a side of a box or a steep line */
+    blocked = anHits(segs, pg.fx, nx, fe - stepUp - 1) || anHits(segs, pg.fx + front, nx + front, fe - stepUp - 1, 1.6) || anHits(segs, pg.fx + front, nx + front, fe - body, 1.6);
+    if (!blocked) { sup = anSupport(segs, nx, fe - stepUp, Math.max(pg.floor, pg.fy) + 60); if (!air && sup && sup[0] < pg.fy - 0.5 && Math.abs(sup[1]) > 1.6 && Math.sign(dx) === Math.sign(-sup[1])) blocked = true; }
+  }
+  if (blocked) {
+    /* bumped into something: stops, and goes the other way */
+    if (pg.bt <= 0) {
+      pg.dir = dx > 0 ? -1 : dx < 0 ? 1 : -pg.dir; pg.bt = 0.6; s.tg = null; s.v *= 0.2; s.hop = null;
+      if (s.rx && s.rx.tg) { s.rx.tg = [2 * s.x - s.rx.tg[0], 2 * s.y - s.rx.tg[1]].concat(s.rx.tg.slice(2)); if (s.rx.d) s.rx.d = [-s.rx.d[0], -s.rx.d[1], 0]; }
+    }
+  } else pg.fx = nx;
+  pg.bt -= dt;
+  /* what holds it up where it is now */
+  if (!sup || blocked) sup = anSupport(anEnvNear(E, pg.fx - 1, pg.fx + 1, skip), pg.fx, fe - stepUp, Math.max(pg.floor, pg.fy) + 60);
+  /* nothing under it: the level where it was put down, unless it is already lower (a line under it was rubbed out) */
+  let gy = sup ? sup[0] : pg.floor >= pg.fy - stepUp ? pg.floor : pg.fy, sl = sup ? sup[1] : 0;
+  if (air) { s.z = Math.max(0, s.z + (gy - pg.fy) / k); pg.fy = gy; pg.vy = 0; }
+  /* a flyer or swimmer has a ceiling too (owner 22 พ.ย. 2569: a bird ringed round with ink flew out over the top): what is
+     drawn above its head, where it is, it does not rise through */
+  if (D.go === 'fly' || D.go === 'swim' || D.air) {
+    const hh = pg.headH || body, top = fb - zb * k - hh; /* the top of its head before this step (it may have risen through a line in this step) */ let ceil = -1e9;
+    /* over the width of its body, not only above its feet (its head is to one side, where a ring curves lower) */
+    const ex = pg.ext || [-cw * 0.2, cw * 0.2], xa = pg.fx + ex[0] * 0.8, xb = pg.fx + ex[1] * 0.8, near = anEnvNear(E, xa - 1, xb + 1, skip);
+    for (let i = 0; i <= 6; i++) { const X = xa + (xb - xa) * i / 6; for (const q of near) { const a = Math.min(q[0], q[2]), b = Math.max(q[0], q[2]); if (X < a || X > b || b - a < 0.01) continue; const y = q[1] + (q[3] - q[1]) * (X - q[0]) / (q[2] - q[0]); if (y < top - 1 && y > ceil) ceil = y; } }
+    if (ceil > -1e9) { const zmax = Math.max(0, (pg.fy - ceil - 3 - hh) / k); if (s.z > zmax) { s.z = zmax; if (s.vz > 0) s.vz = 0; } }
+  }
+  else if (gy < pg.fy) { pg.fy = gy; pg.vy = 0; }
+  else if (gy > pg.fy + 0.5) { pg.vy += 2400 * dt; pg.fy = Math.min(gy, pg.fy + pg.vy * dt); sl = 0; }
+  else { pg.fy = gy; pg.vy = 0; }
+  /* where it lands after being put down is its level from then on (the paper under it) */
+  if (pg.land && !pg.vy) { pg.floor = pg.fy; pg.land = 0; }
+  /* leans with the slope it walks on */
+  const want = D.clip ? 0 : anCl(Math.atan(-sl), -0.6, 0.6); pg.sl += (want - pg.sl) * Math.min(1, 8 * dt);
+  anMeet(it.id);
+  it.x = Math.round((pg.fx - fx0) * 10) / 10; it.y = Math.round((pg.fy - fy0) * 10) / 10; pg.lx = it.x; pg.ly = it.y;
+  el.style.left = it.x + 'px'; el.style.top = it.y + 'px';
+  r.anAcc = (r.anAcc || 0) + dt; if (r.anAcc < (r.anMs > 14 ? 0.05 : 0.03)) return 'skip'; r.anAcc = 0;
+  return 'draw';
+}
+/* two animals that meet: one of a kind stop and look at each other; else the smaller one answers the way it answers a
+   finger (runs, hides, puffs up), away from the bigger one, which stops and looks */
+function anMeet(id) {
+  const A = AN_PAGE.get(id), t = A.t;
+  for (const [jd, B] of AN_PAGE) {
+    if (jd === id || t - B.t > 400 || !B.r.cv || !B.r.cv.isConnected) continue;
+    const dx = B.pg.fx - A.pg.fx, dy = B.pg.fy - A.pg.fy; if (Math.abs(dx) > (A.w + B.w) * 0.2 || Math.abs(dy) > (A.h + B.h) * 0.18) continue;
+    if ((A.pg.meet[jd] || 0) > t || (B.pg.meet[id] || 0) > t) continue;
+    A.pg.meet[jd] = B.pg.meet[id] = t + 6000;
+    const toB = dx >= 0 ? 1 : -1, face = (P, d) => Math.atan2(P.R[1] * d, P.R[0] * d);
+    const look = (X, d, T) => { X.pg.hold = T; X.pg.face = face(X.pg, d); X.pg.dir = -d; X.s.tg = null; };
+    if (A.D === B.D) { look(A, toB, 1.8); look(B, -toB, 1.8); continue; }
+    const [sm, bg, d] = A.w <= B.w ? [A, B, -toB] : [B, A, toB];
+    look(bg, -d, 1.4); sm.pg.dir = d; anReact(sm.D, sm.s, [sm.pg.R[0] * d, sm.pg.R[1] * d, 0]);
+  }
 }
 
 /* ----- birds (chicken, duck, sparrow): body, neck and head that peck, legs with the ankle bent back, wings folded
@@ -523,7 +717,7 @@ function anBird(b, s, C, D) {
   Q.tail(b, s, C, D);
   /* wings: folded on the sides, or spread and beating */
   const fl = air ? Math.sin(s.t * Q.flap * 6.283) : flut ? Math.sin(s.t * 22) : 0, spread = air ? 1 : flut;
-  for (const sd of [1, -1]) {
+  for (const sd of (Q.noWings ? [] : [1, -1])) {
     if (spread > 0.05) {
       b.push([0.03, sd * Q.br[1] * 0.7, Q.br[2] * 0.45], anRx(sd * (0.15 + 0.85 * fl * spread)));
       b.sheet([[0.06, 0, 0], [0.02, sd * Q.ws * spread, 0.01], [-0.06, sd * Q.ws * 0.9 * spread, 0], [-0.12, sd * Q.ws * 0.45 * spread, -0.005], [-0.1, 0, 0]], C.w || C.b);
@@ -537,6 +731,7 @@ function anBird(b, s, C, D) {
     const p = s.ph + (sd > 0 ? 0 : Math.PI), H = [-0.01, sd * Q.br[1] * 0.45, hipz];
     let F = Q.hop ? [0.02 - 0.04 * hop, sd * Q.br[1] * 0.45, 0] : [0.02 + Q.step * Math.sin(p) * mv, sd * Q.br[1] * 0.45, Q.lift * Math.max(0, Math.cos(p)) * Math.min(1, mv)];
     if (air) F = [-0.08, sd * 0.04, hipz - L * 0.9]; else F[2] -= s.z; /* on the ground while it hops */
+    if (Q.oneLeg && !air && sd < 0 && s.act === 'rest') { const up = anBell(s.ap, 0.15); F = anLerp(F, [H[0] + 0.02, H[1], hipz - L * 0.55], up); }
     const K = anIK(H, F, L, L, [-1, 0, 0.2]);
     b.tube([H, K], 0.018 * Q.k, C.b2, { sides: 5 }); b.tube([K, F], 0.008 * Q.k, C.f, { sides: 5 });
     if (Q.web) b.sheet([[F[0] - 0.01, F[1], F[2] + 0.002], [F[0] + 0.07 * Q.k, F[1] + 0.035 * Q.k, F[2]], [F[0] + 0.075 * Q.k, F[1] - 0.035 * Q.k, F[2]]], C.f);
@@ -719,7 +914,7 @@ function anDig(D, s, dt, sp) {
   if (!W.dig) { W.dig = { ph: 0 }; s.h = Math.atan2(-s.y, -s.x) + (anRng(s) - 0.5) * 1.2; }
   const g = W.dig, L = D.L;
   /* near the edge of its patch it bends back towards the middle (under the soil too) */
-  if (Math.hypot(s.x, s.y) > D.roam) s.h = anAng(s.h + anCl(anAng(Math.atan2(-s.y, -s.x) - s.h), -2.5 * dt, 2.5 * dt));
+  if (anFar(D, s)) s.h = anAng(s.h + anCl(anAng(Math.atan2(-s.y, -s.x) - s.h), -2.5 * dt, 2.5 * dt));
   if (g.ph === 0) { /* head goes down, the body slides into the hole after it */
     if (!W.holeA) W.holeA = [s.x, s.y];
     s.v = sp; s.x += Math.cos(s.h) * sp * 0.55 * dt; s.y += Math.sin(s.h) * sp * 0.55 * dt; s.z = Math.max(-L - 0.1, s.z - sp * dt * 1.4);
@@ -774,12 +969,14 @@ function anLizard(b, s, C, D) {
   const gape = s.rx && s.rx.k === 'threat' && s.rx.t < 1.2 ? s.rk : 0;
   for (let i = 0; i <= n; i++) { const u = i / n, x = (0.13 - 0.55 * u) * k, amp = (0.012 + 0.05 * u * u) * k * (0.4 + 0.6 * Math.min(1, mv)); pts.push([x, amp * Math.sin(u * 5 - wv) + (Q.curl ? 0.02 * Math.sin(s.t * 0.7) * u : 0), 0.025 * k * (1 - u * 0.7)]); }
   const prof = (t) => { const r = (t < 0.12 ? 0.022 + 0.06 * t : t < 0.38 ? 0.03 : 0.03 * (1 - (t - 0.38) / 0.62 * 0.92)) * k; return [r, r * 0.62]; };
-  b.tube(pts, prof, (t, a) => (Math.sin(a) < -0.3 ? C.b2 : (Q.spot && Math.sin(t * 60) * Math.cos(a * 3) > 0.55 ? C.s : (Q.band && Math.sin(t * 45) > 0.75 && t > 0.4 ? C.d : C.b))), { sides: 8 });
+  if (Q.crest) for (let i = 1; i < 7; i++) { const p = pts[i], q = pts[i + 1], r = prof(i / n)[1]; b.sheet([[p[0], p[1], p[2] + r * 0.9], [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2, p[2] + r * 0.9 + Q.crest * k * (1 - i / 9)], [q[0], q[1], q[2] + r * 0.9]], C.d); }
+  b.tube(pts, prof, (t, a) => (Math.sin(a) < -0.3 ? C.b2 : (Q.scutes && Math.sin(a) > 0.3 && Math.sin(t * 70) * Math.cos(a * 4) > 0.3 ? C.d : Q.spot && Math.sin(t * 60) * Math.cos(a * 3) > 0.55 ? C.s : (Q.band && Math.sin(t * 45) > 0.75 && t > 0.4 ? C.d : C.b))), { sides: 8 });
   const H = pts[0], f = anUnit(anSub(pts[0], pts[2])), yaw = Math.atan2(f[1], f[0]);
   b.push(anAdd(H, [f[0] * 0.03 * k, f[1] * 0.03 * k, 0.003 * k]), anMs(anRz(yaw), anRy(s.act === 'look' ? -0.25 : 0)));
-  b.ell([0.01 * k, 0, 0], [0.045 * k, 0.026 * k, 0.017 * k], null, C.b, { n1: 7, n2: 9 });
-  b.push([-0.01 * k, 0, -0.008 * k], anRy(0.65 * gape)); b.ell([0.035 * k, 0, -0.003 * k], [0.035 * k, 0.022 * k, 0.007 * k], null, C.b2, { n1: 6, n2: 8 }); b.pop();
-  if (gape > 0.2) b.ell([0.02 * k, 0, -0.008 * k], [0.03 * k, 0.018 * k, 0.006 * k], null, '#C84A4A', { n1: 5, n2: 7 });
+  const sn = Q.snout || 1, hc = Q.blush ? anHexMix(C.b, Q.blush, s.act === 'look' ? anBell(s.ap, 0.25) : 0) : C.b;
+  b.ell([0.01 * k * sn, 0, 0], [0.045 * k * sn, 0.026 * k, 0.017 * k], null, hc, { n1: 7, n2: 9 });
+  b.push([-0.01 * k, 0, -0.008 * k], anRy(0.65 * gape)); b.ell([0.035 * k * sn, 0, -0.003 * k], [0.035 * k * sn, 0.022 * k, 0.007 * k], null, C.b2, { n1: 6, n2: 8 }); b.pop();
+  if (gape > 0.2) b.ell([0.02 * k * sn, 0, -0.008 * k], [0.03 * k * sn, 0.018 * k, 0.006 * k], null, Q.mouth || '#C84A4A', { n1: 5, n2: 7 });
   for (const sd of [1, -1]) b.eye([0.015 * k, sd * 0.022 * k, 0.008 * k], 0.008 * k, [0.2, sd, 0.4], Q.eye);
   if (s.act === 'lick' && Math.sin(s.aT * 5) > 0.6) b.line([[0.05 * k, 0, -0.003 * k], [0.075 * k, 0, 0.002 * k], [0.03 * k, 0.02 * k, 0.01 * k]], '#D86A7A', 0.004 * k);
   b.pop();
@@ -842,6 +1039,7 @@ function anInsect(b, s, C, D) {
   /* the butterfly's tongue uncoils into the flower while it drinks; the mosquito's stays straight */
   if (Q.tongue) { const sip = s.perched ? 1 : 0; if (sip) b.line([[Q.hd[0] * k, 0, -Q.hd[2] * 0.4 * k], [Q.hd[0] * k + 0.01 * k, 0, -Q.hd[2] * k - 0.025 * k]], '#3A2A20', 0.003 * k); else b.line([[Q.hd[0] * k, 0, -Q.hd[2] * 0.5 * k], [Q.hd[0] * k + 0.008 * k, 0, -Q.hd[2] * 0.9 * k], [Q.hd[0] * k + 0.003 * k, 0, -Q.hd[2] * 1.05 * k]], '#3A2A20', 0.003 * k); }
   if (Q.beak) b.line([[Q.hd[0] * k, 0, -Q.hd[2] * 0.3 * k], [Q.hd[0] * k + Q.beak * k, 0, -Q.hd[2] * k - Q.beak * 0.6 * k]], C.a || '#2A2420', 0.003 * k);
+  if (Q.horn) b.tube([[Q.hd[0] * 0.6 * k, 0, Q.hd[2] * 0.4 * k], [Q.hd[0] * 1.6 * k, 0, Q.hd[2] * 1.4 * k], [Q.hd[0] * 2.1 * k, 0, Q.hd[2] * 3 * k], [Q.hd[0] * 1.9 * k, 0, Q.hd[2] * 3.8 * k]], (t) => 0.004 * k * (1 - 0.6 * t), C.d || C.b, { sides: 6 });
   if (Q.jaw) for (const sd of [1, -1]) b.line([[Q.hd[0] * 0.9 * k, sd * 0.004 * k, -0.004 * k], [Q.hd[0] * 1.5 * k, sd * 0.001 * k, -0.006 * k]], C.d || '#2A2420', 0.003 * k);
   b.pop();
   /* wings */
@@ -853,6 +1051,7 @@ function anInsect(b, s, C, D) {
     const sp = Q.leg * k, fx = hx + [0.9, 0.05, -0.9][i] * sp * 0.6, big = Q.hind && i === 2;
     let F = [fx + 0.25 * sp * Math.sin(p) * Math.min(1, mv), sd * sp * (big ? 0.55 : 0.85), 0.25 * sp * Math.max(0, Math.cos(p)) * Math.min(1, mv)];
     if (fly) F = [hx - 0.15 * sp - (i === 2 ? 0.25 * sp : 0), sd * sp * 0.35, Hp[2] - sp * 0.7];
+    if (Q.dead && s.rx && s.rx.k === 'hide') F = anLerp(F, [hx, sd * sp * 0.3, Hp[2] - sp * 0.15], s.rk);
     if (big) { const fold = s.hop ? Math.sin(Math.PI * s.hop.u) : 0, kn = [hx - 0.035 * k - 0.08 * k * fold, sd * 0.03 * k, zb + 0.03 * k - 0.05 * k * fold], ft = [hx + (fold ? -0.1 : 0.01) * k, sd * 0.032 * k, fly ? zb - 0.06 * k : 0]; b.tube([Hp, kn], (t) => 0.007 * k * (1 - 0.4 * t), C.l || C.b, { sides: 5 }); b.line([kn, ft], C.l || C.b, 0.004 * k); continue; }
     const K = anIK(Hp, F, sp * 0.6, sp * 0.72, [0, sd * 0.3, 1]);
     b.line([Hp, K, F], C.l || C.d || '#2A2420', (Q.legw || 0.004) * k);
@@ -960,15 +1159,16 @@ function anSponge(b, s, C, D) {
 }
 /* hydra: a column on its foot with tentacles that wave and catch; a bud grows on the side. Touched, it shrinks into a ball */
 function anHydra(b, s, C, D) {
-  const k = s.rx ? s.rk : 0, sw = Math.sin(s.t * 0.8) * 0.3 * (1 - k), L = 0.2 * (1 - 0.72 * k), pts = [];
+  const Q = D.Q || {}, k = s.rx ? s.rk : 0, sw = Math.sin(s.t * 0.8) * (Q.sway == null ? 0.3 : Q.sway) * (1 - k), L = (Q.L || 0.2) * (1 - 0.72 * k), pts = [];
   for (let i = 0; i <= 6; i++) { const u = i / 6; pts.push([Math.sin(sw * u) * L * u * 0.6, 0, L * u * Math.cos(sw * u * 0.6)]); }
-  b.tube(pts, (t) => 0.014 * (1 + 1.3 * k) * (t < 0.1 ? 1.4 : 1), C.b, { sides: 8 });
-  b.tube([pts[3], anAdd(pts[3], [0.035 * (1 - k), 0.01, 0.025 * (1 - k)])], (t) => 0.008 * (1 - 0.5 * t), C.b, { sides: 6 });
+  b.tube(pts, (t) => (Q.r || 0.014) * (1 + 1.3 * k) * (t < 0.1 ? 1.4 : 1), C.b, { sides: Q.r ? 12 : 8 });
+  if (!Q.r) b.tube([pts[3], anAdd(pts[3], [0.035 * (1 - k), 0.01, 0.025 * (1 - k)])], (t) => 0.008 * (1 - 0.5 * t), C.b, { sides: 6 });
   const top = pts[6], catchK = s.act === 'catch' ? anBell(s.ap, 0.25) : 0;
-  for (let j = 0; j < 6; j++) {
-    const a = j / 6 * 6.283, q = [top]; let p = top, dir = [Math.cos(a) * 0.6, Math.sin(a) * 0.6, 0.8];
-    for (let i = 1; i <= 6; i++) { const w = Math.sin(s.t * 1.6 + j + i * 0.6) * 0.25; dir = anUnit(anAdd(dir, [Math.cos(a) * (0.12 - catchK * 0.3) + w * 0.1, Math.sin(a) * (0.12 - catchK * 0.3), -0.18 - catchK * 0.1])); p = anAdd(p, anMul(dir, 0.026 * (1 - 0.85 * k))); q.push(p); }
-    b.tube(q, (t) => 0.004 * (1 - 0.6 * t), C.b, { sides: 5 });
+  const nt = Q.n || 6, tr = Q.r ? Q.r * 0.8 : 0;
+  for (let j = 0; j < nt; j++) {
+    const a = j / nt * 6.283, ring = Q.r ? (j % 2 ? 0.6 : 1) : 0, q = [anAdd(top, [Math.cos(a) * tr * ring, Math.sin(a) * tr * ring, 0])]; let p = q[0], dir = [Math.cos(a) * 0.6, Math.sin(a) * 0.6, 0.8];
+    for (let i = 1; i <= 6; i++) { const w = Math.sin(s.t * 1.6 + j + i * 0.6) * 0.25; dir = anUnit(anAdd(dir, [Math.cos(a) * (0.12 - catchK * 0.3) + w * 0.1, Math.sin(a) * (0.12 - catchK * 0.3), -0.18 - catchK * 0.1])); p = anAdd(p, anMul(dir, (Q.tl || 0.026) * (1 - 0.85 * k))); q.push(p); }
+    b.tube(q, (t) => (Q.tw || 0.004) * (1 - 0.6 * t), C.t || C.b, { sides: 5 });
   }
 }
 /* jellyfish: the bell squeezes and opens, it rises a little each beat and sinks between; touched, it beats fast and swims off */
@@ -994,7 +1194,7 @@ function anLeechTick(s, dt, act) {
   if (act !== 'go') return false;
   if (!s.tg) s.tg = anTarget(D, s);
   /* near the edge of its pond it turns back towards the middle */
-  const want = Math.hypot(s.x, s.y) > D.roam ? Math.atan2(-s.y, -s.x) : Math.atan2(s.tg[1] - s.y, s.tg[0] - s.x); W.ph += dt * 0.55;
+  const want = anFar(D, s) ? Math.atan2(-s.y, -s.x) : Math.atan2(s.tg[1] - s.y, s.tg[0] - s.x); W.ph += dt * 0.55;
   const u = W.ph % 1, f = [Math.cos(s.h), Math.sin(s.h)], Lc = 0.09, Le = 0.2;
   if (u < 0.5) { const e = anSm(u / 0.5); s.h = anAng(s.h + anCl(anAng(want - s.h), -1.2 * dt, 1.2 * dt)); W.B = [W.A[0] + f[0] * (Lc + (Le - Lc) * e), W.A[1] + f[1] * (Lc + (Le - Lc) * e)]; }
   else { const e = anSm((u - 0.5) / 0.5), d = Le - (Le - Lc) * e; W.A = [W.B[0] - f[0] * d, W.B[1] - f[1] * d]; }
@@ -1100,7 +1300,9 @@ function anMany(b, s, C, D) {
   if (coil < 0.5) {
     const sd0 = anUnit(anCross([0, 0, 1], f));
     for (const k of [1, -1]) b.line([anAdd(h, [0, 0, D.r]), anAdd(anAdd(h, anMul(f, D.ant * 0.5)), anAdd(anMul(sd0, k * D.ant * 0.3), [0, 0, D.r * 2])), anAdd(anAdd(h, anMul(f, D.ant)), anMul(sd0, k * D.ant * 0.55))], C.l, 0.0025);
+    if (D.head) b.ell(anAdd(h, [0, 0, D.r]), [D.r * 1.05, D.r * 1.05, D.r * 1.05], null, D.head, { n1: 6, n2: 8 });
     for (let i = 1; i < n; i++) {
+      if (D.legsOn && !D.legsOn(i, n)) continue;
       const p = pts[i], t = anUnit(anSub(pts[i - 1], pts[i + 1])), sd = anUnit(anCross([0, 0, 1], t));
       for (let pr = 0; pr < (D.pairs || 1); pr++) for (const k of [1, -1]) {
         const ph = s.ph * (D.pairs ? 1.4 : 1) - i * 0.7 - pr * 0.35 + (k > 0 ? 0 : Math.PI), sw = Math.sin(ph) * 0.4 * Math.min(1, mv), lift = Math.max(0, Math.cos(ph)) * D.r * 0.8 * Math.min(1, mv);
@@ -1124,7 +1326,9 @@ function anSwim2(b, s, C, D) {
   for (const sd of [1, -1]) {
     const p = pts[3], fl = 0.15 * Math.sin(s.t * 2 + sd);
     b.sheet([[p[0] + 0.03 * Q.k, p[1] + sd * Q.H * Q.wr * 0.8, p[2] - Q.H * 0.5], [p[0] - 0.06 * Q.k, p[1] + sd * (Q.H * Q.wr + Q.pec), p[2] - Q.H * 0.8 + fl * 0.03], [p[0] - 0.03 * Q.k, p[1] + sd * Q.H * Q.wr * 0.8, p[2] - Q.H * 0.5]], C.b);
-    b.eye([hd[0] - 0.01 * Q.k, hd[1] + sd * Q.H * Q.wr * 0.75, hd[2] + Q.H * 0.12], 0.008 * Q.k, [0.3, sd, 0.1]);
+    if (Q.topEyes) { const e = [hd[0] - 0.01 * Q.k, hd[1] + sd * Q.H * Q.wr * 0.35, hd[2] + Q.H * 0.95]; b.ell(e, [0.012 * Q.k, 0.011 * Q.k, 0.011 * Q.k], null, C.b, { n1: 5, n2: 7 }); b.eye(anAdd(e, [0.004 * Q.k, sd * 0.003 * Q.k, 0.007 * Q.k]), 0.008 * Q.k, [0.3, sd * 0.5, 1]); }
+    else b.eye([hd[0] - 0.01 * Q.k, hd[1] + sd * Q.H * Q.wr * 0.75, hd[2] + Q.H * 0.12], 0.008 * Q.k, [0.3, sd, 0.1]);
+    if (Q.barbels) for (let m = 0; m < 4; m++) { const o = anAdd(pts[0], [0.0, sd * Q.H * (0.15 + 0.12 * m), -Q.H * (m < 2 ? 0.1 : 0.5)]), sw = Math.sin(s.t * 2 + m) * 0.01; b.line([o, anAdd(o, [-0.02 * Q.k, sd * 0.03 * Q.k, -0.01 + sw]), anAdd(o, [-0.04 * Q.k * (m ? 1 : 1.6), sd * 0.05 * Q.k, -0.02 + sw])], C.d, 0.0035 * Q.k); }
     if (Q.gills) for (let g = 0; g < 5; g++) { const x = hd[0] - 0.035 * Q.k - g * 0.012 * Q.k; b.line([[x, hd[1] + sd * Q.H * Q.wr * 0.95, hd[2] + Q.H * 0.25], [x - 0.004, hd[1] + sd * Q.H * Q.wr * 0.95, hd[2] - Q.H * 0.25]], 'rgba(40,50,60,0.8)', 0.003 * Q.k); }
   }
   if (Q.beak) b.tube([anAdd(pts[0], [-0.01, 0, -Q.H * 0.15]), anAdd(pts[0], [0.06 * Q.k, 0, -Q.H * 0.25])], (t) => Q.H * 0.28 * (1 - 0.4 * t), C.b, { sides: 7 });
@@ -1272,6 +1476,305 @@ anDef('penguin', { th: 'เพนกวิน', en: 'penguin', grp: 'สัต�
 anDef('cobra', { th: 'งูเห่า', en: 'cobra', grp: 'สัตว์เลื้อยคลาน', fact: 'งูพิษ แผ่แม่เบี้ยขู่ ใช้ลิ้นแฉกรับกลิ่น', hint: 'เลื้อยส่ายตัว แลบลิ้น แตะแล้วชูคอแผ่แม่เบี้ยขู่ แล้วเลื้อยหนี', kw: 'งู สัตว์เลื้อยคลาน แม่เบี้ย งูพิษ', go: 'walk', L: 0.55, r: 0.02, wiggle: 2.2, spd: 0.1, fast: 0.3, stride: 0.1, turn: 1.4, roam: 0.14, R: 0.36, tz: 0.04, react: 'threat', fleeLen: 0.35,
   loop: [['go', 6], ['rest', 3], ['go', 5]], acts: { go: 'เลื้อย แลบลิ้นรับกลิ่น', rest: 'นอนนิ่ง', threat: 'ชูคอแผ่แม่เบี้ยขู่ แล้วเลื้อยหนี' }, C: { b: '#5A4A36', b2: '#D8C8A0', s: '#C8B48A' }, start: (s) => { s.kind = 'cobra'; anTrailStart(s, 2); }, tick: anWormTick, draw: anCobra, sh: [0.0001, 0.0001] });
 
+/* ----- third set (owner 21 พ.ย. 2569 asked for more): farm and lab mammals, reptiles, fish of the rice field and the mud,
+   a whale, young stages (caterpillar, tadpole), more insects, more sea animals, an owl ----- */
+const AN_HORSE_HEAD = (b, s, C, D, k) => {
+  b.ell([D.Q.hr[0] * 0.75, 0, -0.025], [0.07, 0.048, 0.05], null, C.b, { n1: 6, n2: 8 });
+  b.eye([0.0, 0.05, 0.03], 0.016, [0.2, 1, 0.3]); b.eye([0.0, -0.05, 0.03], 0.016, [0.2, -1, 0.3]);
+  for (const sd of [1, -1]) b.sheet([[-0.07, sd * 0.03, 0.05], [-0.08, sd * 0.04, 0.12], [-0.1, sd * 0.035, 0.05]], C.b);
+};
+const AN_PIG_HEAD = (b, s, C, D, k) => {
+  b.tube([[D.Q.hr[0] * 0.6, 0, -0.01], [D.Q.hr[0] * 1.05, 0, -0.015]], 0.04, C.b, { sides: 9 });
+  b.ball([D.Q.hr[0] * 1.06, 0.013, -0.012], 0.007, C.d); b.ball([D.Q.hr[0] * 1.06, -0.013, -0.012], 0.007, C.d);
+  b.eye([0.03, 0.06, 0.03], 0.011, [0.4, 1, 0.3]); b.eye([0.03, -0.06, 0.03], 0.011, [0.4, -1, 0.3]);
+  for (const sd of [1, -1]) b.sheet([[-0.02, sd * 0.05, 0.06], [0.04, sd * 0.11, 0.05], [-0.03, sd * 0.1, 0.0]], C.b);
+};
+const AN_GOAT_HEAD = (b, s, C, D, k) => {
+  b.ell([D.Q.hr[0] * 0.8, 0, -0.02], [0.05, 0.035, 0.04], null, C.b, { n1: 6, n2: 8 });
+  b.eye([0.01, 0.042, 0.025], 0.011, [0.3, 1, 0.3], '#7A5A1A'); b.eye([0.01, -0.042, 0.025], 0.011, [0.3, -1, 0.3], '#7A5A1A');
+  AN_EAR(b, -0.03, 0.035, 0.02, 0.07, -0.02, 0.022, C.b, 0.02);
+  anHorn(b, [[-0.04, 0.025, 0.045], [-0.07, 0.035, 0.1], [-0.13, 0.045, 0.12], [-0.17, 0.05, 0.09]], 0.014, C.h);
+  b.tube([[0.07, 0, -0.06], [0.08, 0, -0.1]], (t) => 0.012 * (1 - 0.7 * t), C.m, { sides: 5 });
+};
+const AN_RAT_HEAD = (b, s, C, D, k) => {
+  b.tube([[0.02, 0, -0.005], [0.075, 0, -0.012]], (t) => 0.03 * (1 - 0.7 * t), C.b, { sides: 8 }); b.ball([0.078, 0, -0.012], 0.007, '#D88A8A');
+  b.eye([0.02, 0.025, 0.012], 0.009, [0.4, 1, 0.3]); b.eye([0.02, -0.025, 0.012], 0.009, [0.4, -1, 0.3]);
+  for (const sd of [1, -1]) { const e = []; for (let i = 0; i < 8; i++) { const a = i / 8 * 6.283; e.push([-0.015 + Math.cos(a) * 0.018, sd * (0.03 + 0.003 * Math.sin(a)), 0.035 + Math.sin(a) * 0.018]); } b.sheet(e, C.e); }
+  for (const sd of [1, -1]) for (const dz of [-0.004, 0.004]) b.line([[0.07, sd * 0.01, -0.01 + dz], [0.1, sd * 0.05, -0.006 + dz * 3]], 'rgba(60,60,70,0.55)', 0.002);
+};
+const anTailCurl = (b, s, C, D, T0) => { const q = []; for (let i = 0; i <= 10; i++) { const a = i / 10 * 7, r = 0.02 * (1 - i / 14); q.push(anAdd(T0, [-0.02 - i * 0.004, Math.cos(a) * r, Math.sin(a) * r])); } b.tube(q, 0.008, C.b, { sides: 5 }); };
+const anTailGround = (b, s, C, D, T0) => { const q = []; for (let i = 0; i <= 8; i++) { const u = i / 8; q.push(anAdd(T0, [-0.3 * u, Math.sin(s.t * 1.2 + u * 3) * 0.04 * u, -T0[2] * Math.min(1, u * 2) + 0.006])); } b.tube(q, (t) => 0.01 * (1 - 0.7 * t), C.e, { sides: 5 }); };
+const anTailUpShort = (b, s, C, D, T0) => b.tube([T0, anAdd(T0, [-0.03, 0, 0.05 + 0.01 * Math.sin(s.t * 3)])], (t) => 0.015 * (1 - 0.6 * t), C.b, { sides: 6 });
+/* breathing at the surface: whale and dolphin go up, then down again */
+const anBreathe = (id) => (s, dt, act) => { if (act === 'breathe') { const D = AN[id], up = s.ap < 0.75 ? D.zHi + 0.16 : D.z0; s.z += (up - s.z) * Math.min(1, dt * 1.6); } return false; };
+/* tadpole: a round body and a long tail that waves, a fin round the tail; it swims near the bottom */
+function anTadpole(b, s, C, D) {
+  const w = (s.fx.w = (s.fx.w || 0) + 0.016 * (1.5 + 3 * Math.min(1.5, s.mv) + (s.rx ? 3 : 0)) * 4);
+  b.ell([0, 0, 0], [0.032, 0.026, 0.022], null, (u) => (u[2] < -0.3 ? C.b2 : C.b), { n1: 8, n2: 10 });
+  const q = []; for (let i = 0; i <= 7; i++) { const u = i / 7; q.push([-0.025 - 0.07 * u, Math.sin(u * 4 - w) * 0.018 * u, 0]); }
+  b.tube(q, (t) => 0.01 * (1 - 0.85 * t), C.b, { sides: 6 });
+  const fin = [], fin2 = []; for (let i = 0; i <= 7; i++) { const p = q[i], hh = 0.016 * Math.sin(Math.PI * (0.15 + 0.85 * i / 7)); fin.push([p[0], p[1], hh]); fin2.unshift([p[0], p[1], -hh]); }
+  b.sheet(fin.concat(fin2), C.f);
+  for (const sd of [1, -1]) b.eye([0.018, sd * 0.018, 0.01], 0.006, [0.4, sd, 0.4]);
+}
+/* sea urchin: a ball covered in spines that keep moving; touched, the spines bristle towards the finger */
+function anUrchin(b, s, C, D) {
+  const k = s.rx ? s.rk : 0;
+  b.ell([0, 0, 0.032], [0.038, 0.038, 0.03], null, C.b, { n1: 8, n2: 10 });
+  for (let i = 0; i < 46; i++) {
+    const th = Math.acos(1 - (i + 0.5) / 46 * 1.6), ph = i * 2.4, u = [Math.sin(th) * Math.cos(ph), Math.sin(th) * Math.sin(ph), Math.cos(th)];
+    const sw = Math.sin(s.t * 1.5 + i) * 0.12 * (1 - k), d = anUnit([u[0] + sw, u[1] - sw, u[2]]), o = [u[0] * 0.036, u[1] * 0.036, 0.032 + u[2] * 0.028];
+    b.line([o, anAdd(o, anMul(d, 0.05 * (1 + 0.35 * k)))], C.d, 0.003);
+  }
+}
+/* owl: sits up on a stump, turns its head far round to look, a flat face with big eyes forward; it flies off when touched */
+const AN_STUMP = [0.0, 0.0, 0.08];
+function anOwl(b, s, C, D) {
+  const perch = s.perched || s.z <= AN_STUMP[2] + 0.002, fl = Math.sin(s.t * 18);
+  const look = perch ? Math.sin(s.t * 0.45) * 2.0 * Math.max(0, Math.sin(s.t * 0.2)) : 0;
+  b.push([0, 0, 0], anMm(anRy(perch ? 0 : 1.2), [1.5, 0, 0, 0, 1.5, 0, 0, 0, 1.5]));
+  b.ell([0, 0, 0.075], [0.075, 0.05, 0.048], anRy(-Math.PI / 2), (u) => (u[2] < -0.1 && Math.sin(u[0] * 18) > 0 ? C.b2 : C.b), { n1: 9, n2: 11 });
+  for (const sd of [1, -1]) {
+    if (perch) b.ell([-0.01, sd * 0.045, 0.075], [0.055, 0.014, 0.04], anRy(-1.3), C.w, { n1: 6, n2: 8 });
+    else { b.push([0, sd * 0.04, 0.09], anRx(sd * (0.2 + 0.8 * fl))); b.sheet([[0.03, 0, 0], [0.02, sd * 0.2, 0.01], [-0.05, sd * 0.18, 0], [-0.07, 0, 0]], C.w); b.pop(); }
+    b.tube([[0.01, sd * 0.02, 0.01], [0.02, sd * 0.022, -0.005]], 0.006, C.f, { sides: 4 });
+  }
+  b.push([0.005, 0, 0.16], anRz(look));
+  b.ell([0, 0, 0], [0.045, 0.05, 0.045], null, C.b, { n1: 8, n2: 10 });
+  b.ell([0.032, 0, -0.002], [0.012, 0.042, 0.035], null, C.b2, { n1: 6, n2: 9 });
+  for (const sd of [1, -1]) { b.eye([0.042, sd * 0.018, 0.005], 0.017, [1, sd * 0.2, 0.1], '#E8B830'); b.sheet([[0.0, sd * 0.025, 0.035], [-0.005, sd * 0.04, 0.07], [-0.02, sd * 0.035, 0.035]], C.b); }
+  b.tube([[0.044, 0, -0.008], [0.055, 0, -0.016]], (t) => 0.006 * (1 - 0.7 * t), '#4A3A28', { sides: 5 });
+  b.pop(); b.pop();
+}
+
+anDef('horse', { th: 'ม้า', en: 'horse', grp: 'สัตว์เลี้ยงลูกด้วยน้ำนม', fact: 'กินพืช มีกีบเดียว (กีบคี่) ไม่เคี้ยวเอื้อง', hint: 'เดินแล้วก้มเล็มหญ้า สะบัดหาง แตะแล้วควบหนี', kw: 'อาชา สัตว์กินพืช กีบคี่', go: 'walk', spd: 0.16, fast: 0.6, stride: 0.4, turn: 1.4, roam: 0.22, R: 0.95, tz: 0.4, react: 'flee', fleeLen: 0.55,
+  loop: [['go', 6], ['graze', 5], ['look', 2.5], ['go', 5]], acts: { graze: 'ก้มเล็มหญ้า', flee: 'ตกใจ ควบหนี' }, C: { b: '#8A5634', b2: '#A8704A', d: '#2E2420', m: '#2E2420' },
+  Q: Object.assign({}, AN_QCOW, { bx: 0.38, by: 0.14, bz: 0.17, zh: 0.62, fx: 0.26, hx: -0.26, hy: 0.09, fy: 0.09, fz: 0.6, hz: 0.62, l1: 0.33, l2: 0.33, lr: 0.045, lr2: 0.028, hoof: 0.028, step: 0.13, sx: 0.36, sz: 0.72, nl: 0.36, nr: 0.08, na: 0.9, naD: -0.95, ha: 1.2, haD: 1.75, hr: [0.12, 0.05, 0.06], head: AN_HORSE_HEAD, tail: (b, s, C, D, T0) => anTailHang(b, s, T0, 0.42, 0.035, C.m, null, 0.1) }), draw: anQuad, props: anGrassField, sh: [0.45, 0.18] });
+anDef('pig', { th: 'หมู', en: 'pig', grp: 'สัตว์เลี้ยงลูกด้วยน้ำนม', fact: 'กินทั้งพืชและสัตว์ มีกีบคู่ จมูกแบนใช้ดุนดินหาอาหาร', hint: 'เดินดุดิน หางม้วน แตะแล้วร้องวิ่งหนี', kw: 'สุกร กีบคู่ สัตว์กินทั้งพืชและสัตว์', go: 'walk', spd: 0.1, fast: 0.4, stride: 0.22, turn: 1.6, roam: 0.2, R: 0.62, tz: 0.18, react: 'flee', fleeLen: 0.45,
+  loop: [['go', 5], ['sniff', 5], ['go', 4], ['look', 2]], acts: { sniff: 'ใช้จมูกดุนดินหาอาหาร', flee: 'ร้อง วิ่งหนี' }, C: { b: '#E6A79E', b2: '#F0C2BA', d: '#8A4A44' },
+  Q: Object.assign({}, AN_QCOW, { bx: 0.3, by: 0.15, bz: 0.15, zh: 0.27, fx: 0.18, hx: -0.18, hy: 0.08, fy: 0.08, fz: 0.25, hz: 0.27, l1: 0.13, l2: 0.13, lr: 0.04, lr2: 0.03, hoof: 0.022, step: 0.07, lift: 0.04, sx: 0.28, sz: 0.3, nl: 0.06, nr: 0.11, na: 0.1, naD: -0.6, ha: 0.25, haD: 1.0, hr: [0.1, 0.09, 0.09], down: 'sniff', head: AN_PIG_HEAD, tail: anTailCurl }), draw: anQuad, sh: [0.33, 0.17] });
+anDef('goat', { th: 'แพะ', en: 'goat', grp: 'สัตว์เลี้ยงลูกด้วยน้ำนม', fact: 'กินพืช เคี้ยวเอื้อง มีกีบคู่ ปีนที่สูงเก่ง', hint: 'เดินเล็มหญ้า มีเครา เขาโค้งไปหลัง แตะแล้ววิ่งหนี', kw: 'แพะ แกะ เคี้ยวเอื้อง กีบคู่', go: 'walk', spd: 0.13, fast: 0.5, stride: 0.26, turn: 2, roam: 0.22, R: 0.66, tz: 0.24, react: 'flee', fleeLen: 0.45,
+  loop: [['go', 5], ['graze', 5], ['look', 2.4], ['go', 4]], acts: { graze: 'ก้มเล็มหญ้า', flee: 'ตกใจ วิ่งหนี' }, C: { b: '#E6DED0', b2: '#F2EEE6', d: '#4A3E32', m: '#CEC4B4', h: '#8A7A64' },
+  Q: Object.assign({}, AN_QCOW, { bx: 0.27, by: 0.11, bz: 0.12, zh: 0.38, fx: 0.18, hx: -0.18, hy: 0.065, fy: 0.065, fz: 0.37, hz: 0.38, l1: 0.2, l2: 0.2, lr: 0.03, lr2: 0.02, hoof: 0.02, step: 0.09, lift: 0.05, sx: 0.25, sz: 0.44, nl: 0.18, nr: 0.05, na: 0.95, naD: -0.95, ha: 1.0, haD: 1.75, hr: [0.08, 0.04, 0.045], head: AN_GOAT_HEAD, tail: anTailUpShort }), draw: anQuad, props: anGrassField, sh: [0.3, 0.12] });
+anDef('rat', { th: 'หนู', en: 'rat', grp: 'สัตว์เลี้ยงลูกด้วยน้ำนม', fact: 'ฟันหน้างอกยาวตลอดชีวิตจึงต้องแทะ ใช้เป็นสัตว์ทดลอง', hint: 'วิ่งเป็นช่วง ๆ ดมกลิ่น หางยาว แตะแล้ววิ่งหนี', kw: 'หนูบ้าน หนูขาว สัตว์ฟันแทะ สัตว์ทดลอง', go: 'walk', spd: 0.16, fast: 0.6, stride: 0.12, turn: 3.5, acc: 4, roam: 0.16, R: 0.34, tz: 0.06, react: 'flee', fleeLen: 0.35,
+  loop: [['go', 2], ['sniff', 2.5], ['go', 1.6], ['look', 1.6]], acts: { sniff: 'ดมกลิ่นหาอาหาร', flee: 'วิ่งหนี' }, C: { b: '#8A8078', b2: '#C8C0B6', d: '#C89A9A', e: '#D8A8A4' },
+  Q: { bx: 0.11, by: 0.05, bz: 0.045, zh: 0.075, fx: 0.06, hx: -0.06, hy: 0.03, fy: 0.035, fz: 0.065, hz: 0.07, l1: 0.04, l2: 0.04, lr: 0.012, lr2: 0.008, hoof: 0.008, step: 0.035, lift: 0.02, sx: 0.1, sz: 0.085, nl: 0.02, nr: 0.03, na: 0.4, naD: -0.4, ha: 0.1, haD: 0.6, hr: [0.035, 0.03, 0.03], down: 'sniff', head: AN_RAT_HEAD, tail: anTailGround }, draw: anQuad, sh: [0.12, 0.05] });
+anDef('crocodile', { th: 'จระเข้', en: 'crocodile', grp: 'สัตว์เลื้อยคลาน', fact: 'หัวใจสี่ห้อง ผิวเป็นเกล็ดแข็ง วางไข่บนบก', hint: 'นอนนิ่งนาน ๆ แล้วคลานช้า ๆ แตะแล้วอ้าปากขู่ แล้วคลานหนี', kw: 'จระเข้น้ำจืด สัตว์เลื้อยคลาน', go: 'walk', spd: 0.1, fast: 0.4, stride: 0.25, turn: 1.2, acc: 2, roam: 0.1, R: 1.15, tz: 0.04, react: 'threat', fleeLen: 0.4,
+  loop: [['rest', 5], ['go', 4], ['rest', 4], ['look', 2]], acts: { go: 'คลานช้า ๆ', rest: 'นอนนิ่งผึ่งแดด', look: 'ยกหัวมอง', threat: 'อ้าปากขู่ แล้วคลานหนี' }, C: { b: '#5C6A3C', b2: '#C8C08A', d: '#3E4828' },
+  Q: { k: 3.0, snout: 1.9, scutes: true, eye: '#B89A2A', mouth: '#E8C8B0' }, draw: anLizard, ground: anPond, sh: [0.75, 0.16] });
+anDef('gardenlizard', { th: 'กิ้งก่า', en: 'garden lizard', grp: 'สัตว์เลื้อยคลาน', fact: 'เปลี่ยนสีผิวได้ ตัวผู้ผงกหัวและหัวเปลี่ยนเป็นสีแดงเพื่อสื่อสาร', hint: 'วิ่งเป็นช่วง ๆ ผงกหัว หัวเปลี่ยนเป็นสีแดง แตะแล้ววิ่งหนี', kw: 'กิ้งก่าหัวแดง สัตว์เลื้อยคลาน เปลี่ยนสี', go: 'walk', spd: 0.25, fast: 0.8, stride: 0.1, turn: 5, acc: 5, roam: 0.16, R: 0.34, tz: 0.03, react: 'dart', fleeLen: 0.4,
+  loop: [['go', 1.2], ['look', 2.4], ['go', 1], ['rest', 2]], acts: { go: 'วิ่งเป็นช่วง ๆ', look: 'ผงกหัว หัวเปลี่ยนเป็นสีแดง', rest: 'เกาะนิ่ง', dart: 'วิ่งพรวดหนี' }, C: { b: '#8C8A52', b2: '#D8D4A4', d: '#5E5C34' },
+  Q: { k: 1.1, crest: 0.012, blush: '#C8402A', eye: '#3A2A18' }, draw: anLizard, sh: [0.2, 0.06] });
+anDef('whale', { th: 'วาฬ', en: 'whale', grp: 'สัตว์เลี้ยงลูกด้วยน้ำนม', fact: 'สัตว์ที่ใหญ่ที่สุดในโลก ไม่ใช่ปลา หายใจด้วยปอด เลี้ยงลูกด้วยน้ำนม', hint: 'ว่ายช้า ๆ โบกหางขึ้นลง ขึ้นมาพ่นน้ำทางรูหายใจ แตะแล้วดำน้ำหนี', kw: 'วาฬบรูด้า สัตว์เลี้ยงลูกด้วยน้ำนม ไม่ใช่ปลา', go: 'swim', spd: 0.12, fast: 0.35, stride: 0.3, turn: 0.6, acc: 1, roam: 0.3, zLo: 0.2, zHi: 0.3, z0: 0.25, R: 1.0, tz: 0.3, react: 'dart', fleeLen: 0.5,
+  loop: [['go', 7], ['breathe', 4], ['go', 6]], acts: { go: 'ว่ายช้า ๆ โบกหางขึ้นลง', breathe: 'ขึ้นหายใจพ่นน้ำทางรูหายใจ', dart: 'ดำน้ำหนี' }, C: { b: '#4E5E72', b2: '#C8CCD2' },
+  Q: { L: 1.1, H: 0.12, wr: 0.85, A: 0.04, k: 1.9, fin: 0.04, pec: 0.16, vert: true }, tick: anBreathe('whale'), draw: anSwim2, ground: anPond, sh: [0.45, 0.12] });
+anDef('catfish', { th: 'ปลาดุก', en: 'catfish', grp: 'ปลา', fact: 'ไม่มีเกล็ด มีหนวดรับรสสี่คู่ หายใจเอาอากาศจากผิวน้ำได้', hint: 'ว่ายใกล้พื้น ใช้หนวดหาอาหาร แตะแล้วสะบัดหางพุ่งหนี', kw: 'ปลาดุกด้าน ปลาน้ำจืด ไม่มีเกล็ด หนวด', go: 'swim', spd: 0.12, fast: 0.6, stride: 0.2, turn: 1.6, acc: 2.5, roam: 0.22, zLo: 0.06, zHi: 0.12, z0: 0.08, R: 0.45, tz: 0.08, react: 'dart', fleeLen: 0.45,
+  loop: [['go', 5], ['hover', 3], ['go', 4]], acts: { go: 'ว่ายใกล้พื้น', hover: 'ใช้หนวดหาอาหาร', dart: 'สะบัดหาง พุ่งหนี' }, C: { b: '#4A4436', b2: '#C8BCA0', d: '#2E2A22' },
+  Q: { L: 0.46, H: 0.042, wr: 1.1, A: 0.03, k: 0.9, fin: 0.02, pec: 0.04, barbels: true }, draw: anSwim2, ground: anPond, sh: [0.2, 0.05] });
+anDef('mudskipper', { th: 'ปลาตีน', en: 'mudskipper', grp: 'ปลา', fact: 'ปลาที่ขึ้นมาอยู่บนเลนได้ เก็บน้ำไว้ในช่องเหงือกและหายใจทางผิวหนัง', hint: 'ใช้ครีบอกค้ำตัวกระโดดบนเลน ตาโปนอยู่บนหัว แตะแล้วดีดตัวหนี', kw: 'ปลาตีน ป่าชายเลน ปลาขึ้นบก', go: 'hop', spd: 0.3, fast: 0.8, hopLen: 0.07, hopH: 0.03, hopT: 0.3, hopRest: 0.6, jumpLen: 0.25, jumpH: 0.1, turn: 3, roam: 0.14, R: 0.3, tz: 0.04, react: 'jump',
+  loop: [['go', 3], ['rest', 3], ['go', 2], ['look', 2]], acts: { go: 'ใช้ครีบอกค้ำตัวกระโดด', rest: 'หมอบนิ่งบนเลน', look: 'กลอกตามอง', jump: 'ดีดตัวหนี' }, C: { b: '#7A6E52', b2: '#C8BC9C', d: '#4A4234' },
+  Q: { L: 0.2, H: 0.022, wr: 0.9, A: 0.008, k: 0.45, fin: 0.025, pec: 0.03, topEyes: true }, draw: (b, s, C, D) => { b.push([0, 0, D.Q.H]); anSwim2(b, s, C, D); b.pop(); }, ground: anSoil, sh: [0.09, 0.03] });
+anDef('caterpillar', { th: 'หนอนผีเสื้อ', en: 'caterpillar', grp: 'แมลง', fact: 'ตัวหนอนของผีเสื้อ กินใบไม้ ลอกคราบหลายครั้งก่อนเป็นดักแด้', hint: 'คืบไปเป็นคลื่น กินใบไม้ แตะแล้วม้วนตัว', kw: 'หนอน ตัวอ่อน ผีเสื้อ วงจรชีวิต', go: 'walk', L: 0.13, seg: 12, r: 0.011, pairs: 1, ant: 0.006, leg: 0.012, legw: 0.0025, spd: 0.025, fast: 0.025, stride: 0.03, turn: 1, roam: 0.08, R: 0.15, tz: 0.0, react: 'hide', coil: true, head: '#3E4A26',
+  legsOn: (i, n) => i <= 3 || (i >= 6 && i <= 9) || i === n - 1, loop: [['go', 6], ['eat', 3]], acts: { go: 'คืบไปเป็นคลื่น', eat: 'กินใบไม้', hide: 'ม้วนตัว' }, C: { b: '#7CA444', d: '#4E7A2A', l: '#5E7A30' }, start: (s) => anTrailStart(s, 1), draw: anMany,
+  props: (b) => { b.sheet([[0.04, -0.06, 0.001], [0.12, -0.02, 0.001], [0.07, 0.02, 0.001]], '#5E9E3A'); } });
+anDef('tadpole', { th: 'ลูกอ๊อด', en: 'tadpole', grp: 'สัตว์สะเทินน้ำสะเทินบก', fact: 'ตัวอ่อนของกบ หายใจด้วยเหงือก มีหาง โตขึ้นขาหลังงอกก่อนแล้วเปลี่ยนรูปร่างเป็นกบ', hint: 'ว่ายส่ายหางไปมาใกล้พื้น หยุดกินตะไคร่ แตะแล้วว่ายพุ่งหนี', kw: 'ลูกกบ ตัวอ่อน วงจรชีวิต เมทามอร์โฟซิส', go: 'swim', spd: 0.06, fast: 0.3, turn: 3, acc: 3, roam: 0.1, zLo: 0.03, zHi: 0.06, z0: 0.04, R: 0.16, tz: 0.04, react: 'dart', fleeLen: 0.2,
+  loop: [['go', 3], ['hover', 2]], acts: { go: 'ว่ายส่ายหาง', hover: 'หยุดกินตะไคร่', dart: 'ว่ายพุ่งหนี' }, C: { b: '#4A4436', b2: '#8A8064', f: '#9A9070' }, draw: anTadpole, ground: anPond, sh: [0.05, 0.03] });
+anDef('housefly', { th: 'แมลงวัน', en: 'housefly', grp: 'แมลง', fact: 'มีปีกคู่เดียว ปีกคู่หลังเปลี่ยนเป็นตุ่มช่วยทรงตัว เป็นพาหะนำโรค', hint: 'บินวน ลงเกาะแล้วถูขา แตะแล้วบินหนี', kw: 'แมลงวันบ้าน ปีกคู่เดียว พาหะ', go: 'fly', spd: 0.16, fast: 0.6, stride: 0.2, turn: 6, acc: 4, roam: 0.14, zLo: 0.08, zHi: 0.2, z0: 0.14, R: 0.2, tz: 0.07, react: 'flyoff', near: 0.02,
+  loop: [['fly', 3], ['land', 4], ['fly', 2.5]], acts: { fly: 'บินวน', land: 'ลงเกาะ ถูขา', flyoff: 'บินหนี' }, C: { b: '#3A3A3E', t: '#4A4A50', a: '#2A2A2E', e: '#A83A2A', l: '#2E2E34' },
+  perch: (s) => { if (!s.pp) { const p = anTarget(AN.housefly, s); s.pp = [p[0] * 0.7, p[1] * 0.7, 0.03]; } return s.pp; }, enter: (s) => { s.pp = null; },
+  Q: { k: 1.5, zb: 0.012, th: [0.01, 0.008, 0.008], ab: [0.014, 0.009, 0.008], hd: [0.007, 0.009, 0.008], hdp: 0.4, ant: 0.004, leg: 0.016, legw: 0.0022, flap: 40, eye: 0.75,
+    wings: anWingPair([[0, 0, 0], [-0.004, 0.016, 0.003], [-0.03, 0.02, 0.003], [-0.03, 0.006, 0]], null, 'rgba(205,215,225,0.55)', { restA: 0.06, amp: 0.7, mid: 0.3, sweep: 0.35, stroke: 'rgba(110,120,130,0.5)' }) },
+  draw: anInsect, sh: [0.04, 0.025] });
+anDef('beetle', { th: 'ด้วงกว่าง', en: 'rhinoceros beetle', grp: 'แมลง', fact: 'ปีกคู่หน้าแข็งเป็นปลอกหุ้มปีกคู่หลัง เปลี่ยนแปลงรูปร่างสมบูรณ์', hint: 'เดินช้า ๆ ด้วยหกขา ตัวผู้มีเขายาว แตะแล้วแกล้งตาย หดขานิ่ง', kw: 'ด้วง แมลงปีกแข็ง กว่าง', go: 'walk', spd: 0.04, fast: 0.04, stride: 0.05, turn: 2, roam: 0.1, R: 0.2, tz: 0.03, react: 'hide',
+  loop: [['go', 4], ['rest', 3]], acts: { go: 'เดินช้า ๆ', rest: 'หยุดนิ่ง', hide: 'แกล้งตาย หดขานิ่ง' }, C: { b: '#4A2E1E', t: '#3A2418', h: '#2E1C12', a: '#2E1C12', e: '#141010', d: '#2E1C12', l: '#2E1C12' },
+  Q: { k: 2.2, zb: 0.012, th: [0.012, 0.012, 0.008], ab: [0.022, 0.014, 0.01], hd: [0.007, 0.008, 0.006], hdp: 0.2, ant: 0.008, leg: 0.02, legw: 0.003, horn: true, dead: true, eye: 0.3,
+    wings: (b, s, C, D) => { for (const sd of [1, -1]) b.ell([-0.022 * 2.2, sd * 0.0065 * 2.2, 0.006 * 2.2], [0.026 * 2.2, 0.0075 * 2.2, 0.008 * 2.2], null, '#5E3A22', { n1: 7, n2: 8 }); } },
+  draw: anInsect, sh: [0.07, 0.04] });
+anDef('anemone', { th: 'ดอกไม้ทะเล', en: 'sea anemone', grp: 'ไนดาเรีย', fact: 'เกาะอยู่กับที่ หนวดมีเข็มพิษ อยู่ร่วมกับปลาการ์ตูนแบบพึ่งพากัน', hint: 'เกาะหินอยู่กับที่ หนวดจำนวนมากพลิ้วตามน้ำ แตะแล้วหดหนวดเข้า', kw: 'ไนดาเรีย ปลาการ์ตูน ภาวะพึ่งพากัน', go: 'walk', spd: 0.001, fast: 0.001, roam: 0.01, R: 0.18, tz: 0.06, react: 'hide',
+  loop: [['sway', 6], ['catch', 3]], acts: { sway: 'หนวดพลิ้วตามน้ำ', catch: 'ใช้หนวดจับอาหาร', hide: 'หดหนวดเข้า' }, C: { b: '#C8607A', t: '#F0A0B8' }, Q: { r: 0.035, L: 0.07, n: 26, tl: 0.016, tw: 0.006, sway: 0.08 }, draw: anHydra, ground: anSand, sh: [0.06, 0.06] });
+anDef('urchin', { th: 'เม่นทะเล', en: 'sea urchin', grp: 'เอไคโนเดิร์ม', fact: 'มีหนามแหลมรอบตัว เคลื่อนที่ด้วยทิวบ์ฟีต ปากอยู่ด้านล่างมีฟันห้าซี่', hint: 'เคลื่อนที่ช้ามากบนพื้น หนามขยับไปมา แตะแล้วหนามตั้งชันป้องกันตัว', kw: 'หอยเม่น เอไคโนเดิร์ม หนาม', go: 'walk', side: true, spd: 0.016, fast: 0.016, roam: 0.08, R: 0.16, tz: 0.04, react: 'hide',
+  loop: [['go', 10], ['rest', 4]], acts: { go: 'เคลื่อนที่ช้ามากด้วยทิวบ์ฟีต', rest: 'หยุดนิ่ง', hide: 'หนามตั้งชันป้องกันตัว' }, C: { b: '#4A2A4E', d: '#2E1A30' }, draw: anUrchin, ground: anSand, sh: [0.06, 0.06] });
+anDef('owl', { th: 'นกฮูก', en: 'owl', grp: 'สัตว์ปีก (นก)', fact: 'หากินกลางคืน ตามองไปข้างหน้า หมุนคอได้เกือบรอบตัว', hint: 'เกาะตอไม้ หมุนคอมองรอบตัว แตะแล้วบินหนี แล้วกลับมาเกาะ', kw: 'นกเค้าแมว นักล่ากลางคืน', go: 'fly', spd: 0.25, fast: 0.6, stride: 0.2, turn: 3, acc: 2.5, roam: 0.2, zLo: 0.3, zHi: 0.45, z0: AN_STUMP[2], R: 0.42, tz: 0.18, react: 'flyoff', near: 0.02,
+  loop: [['land', 12]], acts: { land: 'เกาะตอไม้ หมุนคอมองรอบตัว', flyoff: 'บินหนี' }, C: { b: '#A27A4E', b2: '#EEE2CA', w: '#8A6440', f: '#C8A040' },
+  perch: () => AN_STUMP.slice(), start: (s) => { s.x = 0; s.y = 0; s.z = AN_STUMP[2]; s.perched = true; s.h = -2.1; },
+  draw: anOwl, props: (b) => b.tube([[0, 0, 0], [0, 0, AN_STUMP[2] - 0.004]], (t) => 0.05 * (1 - 0.15 * t), '#6E665C', { sides: 10 }), sh: [0.1, 0.1] });
+
+/* ----- fourth set (owner 21 พ.ย. 2569): birds that cannot fly, the ant eaters, the animals children see at a zoo; and
+   the mammals and birds put in the groups taught at school ----- */
+const anScaled = (fn, k) => (b, s, C, D, x) => { b.push([0, 0, 0], null, k); fn(b, s, C, D, x); b.pop(); };
+const AN_GIRAFFE_HEAD = (b, s, C, D) => {
+  b.ell([0.1, 0, -0.02], [0.06, 0.04, 0.04], null, C.b, { n1: 6, n2: 8 });
+  for (const sd of [1, -1]) { b.tube([[-0.03, sd * 0.025, 0.05], [-0.04, sd * 0.03, 0.11]], 0.009, C.b, { sides: 5 }); b.ball([-0.04, sd * 0.03, 0.115], 0.013, C.d); AN_EAR(b, -0.05, 0.04, 0.035, 0.06, 0.01, 0.018, C.b, 0); b.eye([0.02, sd * 0.05, 0.03], 0.013, [0.3, sd, 0.3]); }
+};
+const AN_LION_HEAD = (b, s, C, D, k) => { if (D.Q.mane) b.ell([-0.05, 0, -0.03], [0.14, 0.23, 0.25], null, C.m, { n1: 9, n2: 12 }); anScaled(AN_CAT_HEAD, 2.1)(b, s, C, D, k); };
+const AN_BEAR_HEAD = (b, s, C, D) => {
+  const panda = D.id === 'panda';
+  b.ell([0.1, 0, -0.03], [0.07, 0.06, 0.05], null, panda ? C.b : C.b2, { n1: 6, n2: 8 }); b.ball([0.17, 0, -0.025], 0.02, '#1E1A18');
+  for (const sd of [1, -1]) {
+    b.ell([-0.03, sd * 0.09, 0.09], [0.025, 0.035, 0.035], null, panda ? C.d : C.b, { n1: 5, n2: 7 });
+    if (panda) b.ell([0.06, sd * 0.055, 0.025], [0.03, 0.022, 0.035], anRx(sd * 0.5), C.d, { n1: 5, n2: 7 });
+    b.eye([0.075, sd * 0.055, 0.03], 0.011, [0.6, sd, 0.3]);
+  }
+};
+const AN_HIPPO_HEAD = (b, s, C, D, k) => {
+  const gape = k.rxk === 'threat' ? k.rk * (0.6 + 0.3 * Math.sin(s.t * 3)) : 0.06 * Math.max(0, Math.sin(s.t * 0.7));
+  b.ell([0.16, 0, 0.0], [0.13, 0.14, 0.08], null, C.b, { n1: 8, n2: 10 });
+  b.push([0.04, 0, -0.06], anRy(0.9 * gape)); b.ell([0.14, 0, -0.01], [0.13, 0.13, 0.04], null, C.b, { n1: 7, n2: 9 });
+  if (gape > 0.2) { b.ell([0.12, 0, 0.03], [0.11, 0.11, 0.015], null, '#D88A8A', { n1: 6, n2: 8 }); for (const sd of [1, -1]) b.tube([[0.24, sd * 0.08, 0.02], [0.25, sd * 0.08, 0.08]], (t) => 0.012 * (1 - 0.7 * t), '#F2EADA', { sides: 5 }); }
+  b.pop();
+  for (const sd of [1, -1]) { b.ball([0.28, sd * 0.05, 0.06], 0.012, C.d); b.ell([0.0, sd * 0.07, 0.11], [0.025, 0.025, 0.02], null, C.b, { n1: 5, n2: 6 }); b.eye([0.01, sd * 0.07, 0.125], 0.012, [0.3, sd, 0.8]); b.ell([-0.08, sd * 0.08, 0.12], [0.015, 0.012, 0.02], null, C.b, { n1: 4, n2: 6 }); }
+};
+const AN_RHINO_HEAD = (b, s, C, D) => {
+  b.ell([0.12, 0, -0.03], [0.1, 0.08, 0.08], null, C.b, { n1: 7, n2: 9 });
+  b.tube([[0.18, 0, 0.03], [0.22, 0, 0.13], [0.2, 0, 0.21]], (t) => 0.04 * (1 - 0.95 * t), C.h, { sides: 7 });
+  b.tube([[0.09, 0, 0.06], [0.1, 0, 0.12]], (t) => 0.025 * (1 - 0.9 * t), C.h, { sides: 6 });
+  for (const sd of [1, -1]) { b.eye([0.02, sd * 0.08, 0.02], 0.009, [0.3, sd, 0.3]); b.tube([[-0.07, sd * 0.05, 0.07], [-0.08, sd * 0.06, 0.13]], (t) => 0.018 * (1 - 0.7 * t), C.b, { sides: 5 }); }
+};
+const AN_CAMEL_HEAD = (b, s, C, D) => {
+  b.ell([0.09, 0, -0.01], [0.07, 0.04, 0.045], null, C.b, { n1: 6, n2: 8 });
+  for (const sd of [1, -1]) { b.eye([0.0, sd * 0.045, 0.03], 0.012, [0.3, sd, 0.3]); b.sheet([[-0.07, sd * 0.03, 0.04], [-0.08, sd * 0.05, 0.07], [-0.1, sd * 0.035, 0.04]], C.b); }
+};
+const AN_DEER_HEAD = (b, s, C, D) => {
+  b.ell([0.09, 0, -0.025], [0.05, 0.035, 0.035], null, C.b, { n1: 6, n2: 8 }); b.ball([0.135, 0, -0.025], 0.012, '#1E1A18');
+  for (const sd of [1, -1]) {
+    b.eye([0.02, sd * 0.045, 0.025], 0.013, [0.3, sd, 0.3]); AN_EAR(b, -0.04, 0.04, 0.03, 0.08, 0.03, 0.025, C.b, 0);
+    const a0 = [-0.04, sd * 0.025, 0.06], a1 = [-0.06, sd * 0.07, 0.17], a2 = [-0.1, sd * 0.1, 0.28];
+    b.tube([a0, a1, a2], (t) => 0.012 * (1 - 0.6 * t), C.h, { sides: 5 }); b.tube([a1, anAdd(a1, [0.06, sd * 0.01, 0.06])], (t) => 0.008 * (1 - 0.7 * t), C.h, { sides: 4 }); b.tube([anLerp(a1, a2, 0.6), anAdd(anLerp(a1, a2, 0.6), [0.04, sd * 0.03, 0.07])], (t) => 0.007 * (1 - 0.7 * t), C.h, { sides: 4 });
+  }
+};
+const AN_SNOUT_HEAD = (len, r) => (b, s, C, D, k) => {
+  b.tube([[0.03, 0, -0.005], [0.03 + len * 0.6, 0, -0.012], [0.03 + len, 0, -0.03]], (t) => r * (1 - 0.7 * t), C.b, { sides: 7 });
+  if (D.id === 'anteater' && D.Q.down && s.act === D.Q.down && Math.sin(s.t * 8) > 0) b.line([[0.03 + len, 0, -0.03], [0.05 + len * 1.3, 0, -0.06]], '#C85A6A', 0.004);
+  for (const sd of [1, -1]) { b.eye([0.01, sd * D.Q.hr[1] * 0.8, 0.012], 0.007, [0.3, sd, 0.3]); b.ell([-0.03, sd * D.Q.hr[1] * 0.85, 0.02], [0.01, 0.006, 0.012], null, C.b, { n1: 4, n2: 5 }); }
+};
+const AN_PRIMATE_HEAD = (b, s, C, D) => {
+  const big = D.id === 'orangutan';
+  b.ell([0.05, 0, -0.01], [0.04, 0.06, 0.06], null, C.f, { n1: 6, n2: 8 });
+  if (big) for (const sd of [1, -1]) b.ell([0.03, sd * 0.07, -0.0], [0.02, 0.04, 0.05], null, C.f, { n1: 5, n2: 7 });
+  b.ell([0.085, 0, -0.03], [0.025, 0.035, 0.022], null, C.f, { n1: 5, n2: 7 });
+  for (const sd of [1, -1]) { b.eye([0.08, sd * 0.022, 0.012], 0.01, [1, sd * 0.2, 0.1]); b.ell([0.0, sd * 0.075, 0.01], [0.012, 0.012, 0.018], null, C.f, { n1: 4, n2: 6 }); }
+};
+const anTailBushy = (b, s, C, D, T0) => { const q = []; for (let i = 0; i <= 6; i++) { const u = i / 6; q.push(anAdd(T0, [-0.3 * u, Math.sin(s.t * 0.9) * 0.05 * u, -0.05 * u + 0.04 * Math.sin(Math.PI * u)])); } b.tube(q, (t) => [0.03 * (0.6 + 0.8 * Math.sin(Math.PI * Math.min(1, t * 0.9 + 0.1))), 0.08 * Math.sin(Math.PI * Math.min(1, t * 0.95 + 0.05))], C.b, { sides: 8 }); };
+const anTailScaly = (b, s, C, D, T0) => { const q = []; for (let i = 0; i <= 8; i++) { const u = i / 8; q.push(anAdd(T0, [-0.35 * u, Math.sin(s.t * 0.8 + u * 2) * 0.04 * u, -T0[2] * Math.min(1, u * 1.6) + 0.02 * (1 - u)])); } b.tube(q, (t) => 0.05 * (1 - 0.85 * t), D.Q.coat ? (t, a) => (Math.sin(t * 40) > 0.3 ? C.d : C.b) : C.b, { sides: 8 }); };
+const anTailNone = () => {};
+const anSpines = (n, len) => (b, s, C, D, body, M) => { const Q = D.Q, up = s.rx ? 1 + 0.4 * s.rk : 1; for (let i = 0; i < n; i++) { const u = (i * 0.618) % 1, v = (i * 0.37) % 1, a = (u - 0.5) * 2.4, th = 0.4 + v * 1.5; const p = body([Q.bx * 0.85 * Math.cos(th) * Math.sign(a || 1) * 0, Math.sin(a) * Q.by, Q.zh]); const o = body([Math.cos(a * 1.3) * Q.bx * (u * 1.6 - 0.8), Math.sin(a) * Q.by * 0.9, Q.zh + Q.bz * Math.cos(a) * 0.9]), d = anUnit([o[0] * 0.3 - 0.4, (o[1] - p[1]) * 3, 1]); b.line([o, anAdd(o, anMul(d, len * up))], i % 3 ? '#E8DCC0' : '#2A221C', 0.004); } };
+const AN_QBIG = (o) => Object.assign({}, AN_QCOW, { head: AN_COW_HEAD, tail: (b, s, C, D, T0) => anTailHang(b, s, T0, 0.3, 0.018, C.b, C.d, 0) }, o);
+const AN_STRIPES = (u, C) => (u[2] < -0.5 ? C.b2 : Math.sin(u[0] * 26 + u[2] * 4) > 0.1 ? C.d : C.b);
+
+anDef('giraffe', { th: 'ยีราฟ', en: 'giraffe', fact: 'สัตว์ที่สูงที่สุด คอยาวแต่มีกระดูกคอเจ็ดชิ้นเท่าคน', hint: 'เดินช้า ๆ ยืดคอกินใบไม้บนยอดไม้ ก้มดื่มน้ำ แตะแล้ววิ่งหนี', kw: 'สวนสัตว์ แอฟริกา คอยาว', go: 'walk', spd: 0.14, fast: 0.45, stride: 0.45, turn: 1, roam: 0.2, R: 1.45, tz: 0.85, react: 'flee', fleeLen: 0.5,
+  loop: [['go', 6], ['browse', 6], ['go', 5], ['graze', 4]], acts: { browse: 'ยืดคอกินใบไม้บนยอดไม้', graze: 'ก้มดื่มน้ำ' }, C: { b: '#E0B060', b2: '#F2E2B8', d: '#7A4A22', s: '#8A5428' },
+  Q: AN_QBIG({ bx: 0.32, by: 0.15, bz: 0.17, zh: 0.95, fx: 0.2, hx: -0.22, hy: 0.09, fy: 0.09, fz: 0.95, hz: 0.9, l1: 0.5, l2: 0.5, lr: 0.04, lr2: 0.025, hoof: 0.03, step: 0.15, sx: 0.28, sz: 1.08, nl: 0.75, nr: 0.06, na: 1.15, naD: -0.45, ha: 1.4, haD: 1.6, hr: [0.12, 0.055, 0.06],
+    coat: (u, C) => (u[2] < -0.5 ? C.b2 : Math.sin(u[0] * 14) * Math.sin(u[1] * 12 + u[2] * 9) > 0.15 ? C.s : C.b), head: AN_GIRAFFE_HEAD, tail: (b, s, C, D, T0) => anTailHang(b, s, T0, 0.45, 0.015, C.b, C.d, 0) }), draw: anQuad,
+  tick: (s, dt, act) => { if (act === 'browse') AN.giraffe.Q.na = 1.15 + 0.2 * anBell(s.ap, 0.2); else AN.giraffe.Q.na = 1.15; return false; },
+  props: (b) => { b.tube([[0.45, 0.3, 0], [0.46, 0.3, 0.9], [0.44, 0.31, 1.5]], (t) => 0.05 * (1 - 0.5 * t), '#7A5A3A', { sides: 7 }); b.ell([0.42, 0.3, 1.62], [0.25, 0.22, 0.14], null, '#5E9E3A', { n1: 7, n2: 9 }); }, sh: [0.45, 0.2] });
+anDef('zebra', { th: 'ม้าลาย', en: 'zebra', fact: 'ลายของแต่ละตัวไม่ซ้ำกัน ลายช่วยให้สับสนเมื่อวิ่งเป็นฝูง', hint: 'เดินเล็มหญ้า สะบัดหาง แตะแล้วควบหนี', kw: 'สวนสัตว์ แอฟริกา กีบคี่', go: 'walk', spd: 0.16, fast: 0.6, stride: 0.4, turn: 1.4, roam: 0.22, R: 0.95, tz: 0.4, react: 'flee', fleeLen: 0.55,
+  loop: [['go', 6], ['graze', 5], ['look', 2.5], ['go', 5]], acts: { graze: 'ก้มเล็มหญ้า', flee: 'ตกใจ ควบหนี' }, C: { b: '#F2EEE6', b2: '#F2EEE6', d: '#1E1E22', m: '#1E1E22' },
+  Q: Object.assign({}, AN.horse.Q, { coat: AN_STRIPES, legCol: (C) => '#D8D4CC' }), draw: anQuad, props: anGrassField, sh: [0.45, 0.18] });
+anDef('lion', { th: 'สิงโต', en: 'lion', fact: 'สัตว์กินเนื้อที่อยู่เป็นฝูง ตัวผู้มีแผงคอ ตัวเมียเป็นผู้ล่าหลัก', hint: 'เดินช้า ๆ นอนพัก แตะแล้วคำรามขู่ แล้วเดินหนี', kw: 'สวนสัตว์ สัตว์กินเนื้อ แผงคอ', go: 'walk', spd: 0.14, fast: 0.4, stride: 0.38, turn: 1.6, roam: 0.2, R: 0.9, tz: 0.32, react: 'threat', fleeLen: 0.35,
+  loop: [['go', 5], ['sit', 6], ['look', 2.5], ['go', 4]], acts: { sit: 'นั่งพัก', threat: 'คำรามขู่ แล้วเดินหนี' }, C: { b: '#C8964E', b2: '#E6CC9A', d: '#C98A8A', m: '#6A3E1A' },
+  Q: Object.assign({}, AN.cat.Q, { bx: 0.42, by: 0.15, bz: 0.16, zh: 0.5, fx: 0.28, hx: -0.28, hy: 0.09, fy: 0.09, fz: 0.5, hz: 0.52, l1: 0.28, l2: 0.28, lr: 0.06, lr2: 0.04, hoof: 0.04, step: 0.13, lift: 0.07, sx: 0.38, sz: 0.58, nl: 0.12, nr: 0.11, na: 0.4, naD: 0.0, ha: 0.1, haD: 0.5, hr: [0.14, 0.13, 0.12], arch: false, mane: true, head: AN_LION_HEAD, tail: (b, s, C, D, T0) => anTailHang(b, s, T0, 0.5, 0.02, C.b, C.m, 0.2) }), draw: anQuad, sh: [0.48, 0.18] });
+anDef('tiger', { th: 'เสือโคร่ง', en: 'tiger', fact: 'แมวใหญ่ที่สุด ลายบนตัวไม่ซ้ำกัน ชอบอยู่ตัวเดียว ว่ายน้ำเก่ง', hint: 'เดินย่องลาดตระเวน นั่งพัก แตะแล้วขู่ แล้วเดินหนี', kw: 'สวนสัตว์ เสือ สัตว์กินเนื้อ ลาย', go: 'walk', spd: 0.15, fast: 0.45, stride: 0.38, turn: 1.6, roam: 0.2, R: 0.9, tz: 0.32, react: 'threat', fleeLen: 0.35,
+  loop: [['go', 6], ['sit', 5], ['go', 4], ['look', 2.4]], acts: { go: 'เดินย่อง', sit: 'นั่งพัก', threat: 'ขู่ แล้วเดินหนี' }, C: { b: '#D8822E', b2: '#F2E6D0', d: '#1E1A18' },
+  Q: Object.assign({}, AN.lion.Q, { mane: false, coat: AN_STRIPES }), draw: anQuad, sh: [0.48, 0.18] });
+anDef('bear', { th: 'หมี', en: 'sun bear', fact: 'หมีหมา หมีที่เล็กที่สุด มีลายรูปเกือกม้าที่อก ลิ้นยาวกินน้ำผึ้งและแมลง', hint: 'เดินต้วมเตี้ยม ดมกลิ่นหาอาหาร ลุกยืนสองขา แตะแล้วยืนขู่ แล้วเดินหนี', kw: 'หมีหมา หมีควาย สวนสัตว์ สัตว์กินเนื้อ', go: 'walk', spd: 0.1, fast: 0.35, stride: 0.26, turn: 1.6, roam: 0.18, R: 0.75, tz: 0.25, react: 'threat', fleeLen: 0.3,
+  loop: [['go', 5], ['sniff', 4], ['sit', 4], ['go', 4]], acts: { sniff: 'ดมกลิ่นหาอาหาร', sit: 'นั่งพัก', threat: 'ยืนขู่ แล้วเดินหนี' }, C: { b: '#2A2420', b2: '#C8A06A', d: '#1A1614' },
+  Q: Object.assign({}, AN.dog.Q, { bx: 0.3, by: 0.16, bz: 0.15, zh: 0.36, fx: 0.2, hx: -0.2, hy: 0.09, fy: 0.09, fz: 0.36, hz: 0.37, l1: 0.19, l2: 0.19, lr: 0.06, lr2: 0.05, hoof: 0.04, step: 0.09, sx: 0.28, sz: 0.42, nl: 0.06, nr: 0.1, na: 0.3, naD: -0.6, ha: 0.25, haD: 1.1, hr: [0.11, 0.1, 0.1], arch: true, head: AN_BEAR_HEAD, tail: anTailNone,
+    coat: (u, C) => (u[0] > 0.55 && u[2] < 0.1 && u[2] > -0.5 && Math.abs(u[1]) < 0.6 ? C.b2 : C.b) }), draw: anQuad, sh: [0.35, 0.18] });
+anDef('panda', { th: 'หมีแพนด้า', en: 'giant panda', fact: 'จัดเป็นสัตว์กินเนื้อ แต่กินไผ่เป็นอาหารหลัก มีนิ้วเทียมช่วยจับไผ่', hint: 'เดินต้วมเตี้ยม นั่งกินไผ่ แตะแล้วเดินหนีช้า ๆ', kw: 'แพนด้า สวนสัตว์ จีน ไผ่', go: 'walk', spd: 0.08, fast: 0.25, stride: 0.26, turn: 1.4, roam: 0.16, R: 0.75, tz: 0.25, react: 'flee', fleeLen: 0.3,
+  loop: [['sit', 7], ['go', 4], ['sniff', 3]], acts: { sit: 'นั่งกินไผ่', sniff: 'ดมกลิ่น', flee: 'เดินหนีช้า ๆ' }, C: { b: '#F2F0EA', b2: '#F2F0EA', d: '#1E1E20' },
+  Q: Object.assign({}, AN.bear.Q, { arch: false, legCol: (C) => C.d, coat: (u, C) => (u[0] > 0.1 && u[0] < 0.6 && u[2] > -0.6 ? C.d : C.b) }), draw: anQuad,
+  props: (b) => { for (let i = 0; i < 3; i++) b.tube([[0.35 + i * 0.05, -0.25, 0], [0.36 + i * 0.05, -0.25, 0.6 + i * 0.1]], 0.012, '#7AA04A', { sides: 5, cap: false }); }, sh: [0.35, 0.18] });
+anDef('hippo', { th: 'ฮิปโปโปเตมัส', en: 'hippopotamus', fact: 'อยู่ในน้ำเกือบทั้งวัน กินพืช อ้าปากกว้างเพื่อขู่ ญาติใกล้ชิดของวาฬ', hint: 'เดินช้า ๆ อ้าปากหาว แตะแล้วอ้าปากกว้างขู่ แล้วเดินหนี', kw: 'ฮิปโป สวนสัตว์ หมูเด้ง แอฟริกา', go: 'walk', spd: 0.08, fast: 0.3, stride: 0.3, turn: 1.2, roam: 0.18, R: 0.95, tz: 0.25, react: 'threat', fleeLen: 0.35,
+  loop: [['go', 5], ['graze', 4], ['look', 3]], acts: { graze: 'ก้มกินหญ้า', look: 'อ้าปากหาว', threat: 'อ้าปากกว้างขู่ แล้วเดินหนี' }, C: { b: '#7A6E78', b2: '#C8A8A8', d: '#3E3640' },
+  Q: AN_QBIG({ bx: 0.42, by: 0.24, bz: 0.22, zh: 0.38, fx: 0.26, hx: -0.28, hy: 0.14, fy: 0.15, fz: 0.36, hz: 0.38, l1: 0.18, l2: 0.18, lr: 0.08, lr2: 0.07, hoof: 0.05, step: 0.08, sx: 0.4, sz: 0.44, nl: 0.06, nr: 0.17, na: 0.0, naD: -0.5, ha: 0.1, haD: 0.7, hr: [0.14, 0.13, 0.12], head: AN_HIPPO_HEAD, tail: (b, s, C, D, T0) => anTailHang(b, s, T0, 0.1, 0.02, C.b, null, 0) }), draw: anQuad, ground: anPond, sh: [0.5, 0.28] });
+anDef('rhino', { th: 'แรด', en: 'rhinoceros', fact: 'นอแรดทำจากเคราติน สารเดียวกับเส้นผมและเล็บ ไม่ใช่กระดูก', hint: 'เดินช้า ๆ ก้มเล็มหญ้า แตะแล้วก้มหัวพุ่งชน แล้ววิ่งหนี', kw: 'สวนสัตว์ นอ กีบคี่', go: 'walk', spd: 0.1, fast: 0.45, stride: 0.32, turn: 1.2, roam: 0.18, R: 0.95, tz: 0.3, react: 'flee', fleeLen: 0.45,
+  loop: [['go', 5], ['graze', 5], ['look', 2.5]], acts: { graze: 'ก้มเล็มหญ้า', flee: 'ก้มหัว วิ่งพุ่ง' }, C: { b: '#8A8680', b2: '#9A9690', d: '#4A4642', h: '#C8BCA8' },
+  Q: AN_QBIG({ bx: 0.42, by: 0.2, bz: 0.21, zh: 0.48, fx: 0.27, hx: -0.28, hy: 0.12, fy: 0.13, fz: 0.46, hz: 0.48, l1: 0.24, l2: 0.24, lr: 0.07, lr2: 0.06, hoof: 0.05, step: 0.1, sx: 0.4, sz: 0.52, nl: 0.08, nr: 0.15, na: 0.0, naD: -0.7, ha: 0.4, haD: 1.0, hr: [0.16, 0.1, 0.1], head: AN_RHINO_HEAD }), draw: anQuad, props: anGrassField, sh: [0.48, 0.22] });
+anDef('camel', { th: 'อูฐ', en: 'camel', fact: 'โหนกสะสมไขมันไม่ใช่น้ำ ขนตายาวกันทราย ทนแล้งได้นาน', hint: 'เดินโยกตัวช้า ๆ เคี้ยวอาหาร แตะแล้วร้องแล้วเดินหนี', kw: 'สวนสัตว์ ทะเลทราย โหนก เคี้ยวเอื้อง', go: 'walk', spd: 0.14, fast: 0.4, stride: 0.45, turn: 1.2, roam: 0.2, R: 1.15, tz: 0.55, react: 'flee', fleeLen: 0.45,
+  loop: [['go', 6], ['graze', 4], ['look', 3]], acts: { go: 'เดินโยกตัว', graze: 'ก้มกินพืช', flee: 'ร้อง แล้วเดินหนี' }, C: { b: '#C89A62', b2: '#D8B482', d: '#5A4632' },
+  Q: AN_QBIG({ bx: 0.36, by: 0.15, bz: 0.17, zh: 0.82, fx: 0.24, hx: -0.24, hy: 0.09, fy: 0.09, fz: 0.8, hz: 0.82, l1: 0.43, l2: 0.43, lr: 0.045, lr2: 0.03, hoof: 0.04, step: 0.15, sx: 0.32, sz: 0.86, nl: 0.45, nr: 0.06, na: 0.15, naD: -1.2, ha: -0.2, haD: 1.4, hr: [0.11, 0.05, 0.055], head: AN_CAMEL_HEAD,
+    extra: (b, s, C, D, body, M) => b.ell(body([0.0, 0, D.Q.zh + D.Q.bz * 0.9]), [0.13, 0.1, 0.12], M, C.b, { n1: 7, n2: 9 }) }), draw: anQuad, sh: [0.42, 0.18] });
+anDef('deer', { th: 'กวาง', en: 'deer', fact: 'เขากวางเป็นกระดูก ผลัดทิ้งและงอกใหม่ทุกปี มีเฉพาะตัวผู้', hint: 'เดินเล็มหญ้า เงยหน้าฟัง แตะแล้วกระโจนหนี', kw: 'กวางป่า สวนสัตว์ เขา เคี้ยวเอื้อง', go: 'walk', spd: 0.14, fast: 0.6, stride: 0.32, turn: 1.8, roam: 0.2, R: 0.85, tz: 0.4, react: 'flee', fleeLen: 0.55,
+  loop: [['go', 5], ['graze', 5], ['look', 3]], acts: { graze: 'ก้มเล็มหญ้า', look: 'เงยหน้าฟังเสียง', flee: 'กระโจนหนี' }, C: { b: '#A06A3E', b2: '#E6D2B4', d: '#2E2420', h: '#C8B48E' },
+  Q: AN_QBIG({ bx: 0.3, by: 0.11, bz: 0.13, zh: 0.5, fx: 0.2, hx: -0.2, hy: 0.065, fy: 0.065, fz: 0.49, hz: 0.5, l1: 0.27, l2: 0.27, lr: 0.03, lr2: 0.018, hoof: 0.02, step: 0.11, sx: 0.28, sz: 0.58, nl: 0.25, nr: 0.05, na: 0.9, naD: -0.95, ha: 1.0, haD: 1.75, hr: [0.09, 0.045, 0.05], head: AN_DEER_HEAD, tail: anTailUpShort }), draw: anQuad, props: anGrassField, sh: [0.32, 0.12] });
+anDef('monkey', { th: 'ลิง', en: 'macaque', fact: 'ไพรเมต มีนิ้วโป้งหยิบจับของได้ ตามองไปข้างหน้ากะระยะได้ดี', hint: 'ลิงแสม เดินสี่ขา นั่งหาเหาเกาตัว แตะแล้วแยกเขี้ยวขู่ แล้ววิ่งหนี', kw: 'ลิงแสม ไพรเมต สวนสัตว์', go: 'walk', spd: 0.14, fast: 0.5, stride: 0.2, turn: 2.5, roam: 0.18, R: 0.55, tz: 0.18, react: 'threat', fleeLen: 0.4,
+  loop: [['go', 4], ['sit', 6], ['look', 2]], acts: { go: 'เดินสี่ขา', sit: 'นั่งเกาตัว', threat: 'แยกเขี้ยวขู่ แล้ววิ่งหนี' }, C: { b: '#8A7454', b2: '#B8A27E', d: '#5A4A36', f: '#D8A890' },
+  Q: { bx: 0.17, by: 0.08, bz: 0.09, zh: 0.25, fx: 0.11, hx: -0.12, hy: 0.06, fy: 0.06, fz: 0.27, hz: 0.24, l1: 0.13, l2: 0.13, fl: 1.1, lr: 0.025, lr2: 0.018, hoof: 0.018, step: 0.07, lift: 0.04, sx: 0.15, sz: 0.31, nl: 0.04, nr: 0.05, na: 0.6, naD: 0.2, ha: 0.0, haD: 0.5, hr: [0.06, 0.055, 0.06], tl: 0.3, tr: 0.012, head: AN_PRIMATE_HEAD, tail: anTailUp }, draw: anQuad, sh: [0.2, 0.1] });
+anDef('orangutan', { th: 'อุรังอุตัง', en: 'orangutan', fact: 'ลิงใหญ่ไม่มีหาง แขนยาวกว่าขา ใช้เครื่องมือได้ ใกล้เคียงกับคน', hint: 'เดินช้า ๆ ด้วยแขนยาว นั่งนิ่งคิด แตะแล้วเดินหนี', kw: 'ลิงใหญ่ ไพรเมต สวนสัตว์ ไม่มีหาง', go: 'walk', spd: 0.07, fast: 0.25, stride: 0.3, turn: 1.4, roam: 0.16, R: 0.75, tz: 0.3, react: 'flee', fleeLen: 0.3,
+  loop: [['sit', 6], ['go', 4], ['look', 3]], acts: { go: 'เดินด้วยแขนยาว', sit: 'นั่งนิ่ง', flee: 'เดินหนี' }, C: { b: '#B05A2A', b2: '#C8703A', d: '#4A2A1A', f: '#6A4A3A' },
+  Q: { bx: 0.24, by: 0.14, bz: 0.15, zh: 0.36, fx: 0.15, hx: -0.15, hy: 0.1, fy: 0.12, fz: 0.42, hz: 0.32, l1: 0.15, l2: 0.15, fl: 1.55, lr: 0.05, lr2: 0.035, hoof: 0.03, step: 0.08, lift: 0.04, sx: 0.22, sz: 0.48, nl: 0.04, nr: 0.08, na: 0.6, naD: 0.2, ha: 0.0, haD: 0.4, hr: [0.08, 0.08, 0.085], head: AN_PRIMATE_HEAD, tail: anTailNone }, draw: anQuad, sh: [0.3, 0.16] });
+anDef('anteater', { th: 'ตัวกินมด', en: 'giant anteater', fact: 'ไม่มีฟัน ใช้ลิ้นยาวเหนียวเลียมดและปลวก เล็บหน้ายาวขุดรัง', hint: 'เดินดมพื้น ยื่นลิ้นยาวเลียมด หางพวงใหญ่ แตะแล้วยืนขู่ แล้วเดินหนี', kw: 'ตัวกินมดยักษ์ กินมด ปลวก ไม่มีฟัน', go: 'walk', spd: 0.1, fast: 0.35, stride: 0.26, turn: 1.6, roam: 0.18, R: 0.75, tz: 0.2, react: 'threat', fleeLen: 0.3,
+  loop: [['go', 4], ['sniff', 5], ['go', 4]], acts: { go: 'เดินดมพื้น', sniff: 'ยื่นลิ้นเลียมดและปลวก', threat: 'ยืนขู่ แล้วเดินหนี' }, C: { b: '#6A5848', b2: '#C8B898', d: '#2A2220' },
+  Q: Object.assign({}, AN.dog.Q, { bx: 0.3, by: 0.12, bz: 0.14, zh: 0.34, fx: 0.2, hx: -0.2, hy: 0.07, fy: 0.07, fz: 0.34, hz: 0.35, l1: 0.18, l2: 0.18, lr: 0.045, lr2: 0.035, hoof: 0.03, sx: 0.27, sz: 0.36, nl: 0.1, nr: 0.06, na: 0.0, naD: -0.7, ha: 0.3, haD: 1.0, hr: [0.06, 0.045, 0.045], arch: true, head: AN_SNOUT_HEAD(0.22, 0.03), tail: anTailBushy,
+    coat: (u, C) => (u[0] > 0.2 && u[2] > -0.1 && Math.abs(u[1] + u[2] * 0.4 - 0.2) < 0.2 ? C.d : u[2] < -0.5 ? C.b2 : C.b) }), draw: anQuad, sh: [0.4, 0.15] });
+anDef('pangolin', { th: 'ตัวนิ่ม', en: 'pangolin', fact: 'ตัวลิ่น มีเกล็ดแข็งทั้งตัวทั้งที่เป็นสัตว์เลี้ยงลูกด้วยน้ำนม กินมดและปลวก ม้วนตัวเป็นก้อนเมื่อมีภัย', hint: 'เดินช้า ๆ ดมหามดและปลวก แตะแล้วม้วนตัวเป็นก้อนเกล็ด', kw: 'ตัวลิ่น นิ่ม เกล็ด กินมด ปลวก', go: 'walk', spd: 0.06, fast: 0.06, stride: 0.15, turn: 1.4, roam: 0.14, R: 0.55, tz: 0.1, react: 'hide',
+  loop: [['go', 5], ['sniff', 4]], acts: { go: 'เดินช้า ๆ', sniff: 'ดมหามดและปลวก', hide: 'ม้วนตัวเป็นก้อนเกล็ด' }, C: { b: '#8A6E4E', b2: '#C8AA82', d: '#5A4632' },
+  Q: Object.assign({}, AN.dog.Q, { bx: 0.18, by: 0.08, bz: 0.08, zh: 0.12, fx: 0.11, hx: -0.11, hy: 0.05, fy: 0.06, fz: 0.11, hz: 0.12, l1: 0.06, l2: 0.06, lr: 0.025, lr2: 0.02, hoof: 0.02, step: 0.04, lift: 0.02, sx: 0.16, sz: 0.13, nl: 0.04, nr: 0.04, na: -0.1, naD: -0.4, ha: 0.2, haD: 0.6, hr: [0.045, 0.035, 0.035], ball: true, head: AN_SNOUT_HEAD(0.06, 0.025), tail: anTailScaly,
+    coat: (u, C) => (Math.sin(u[0] * 22) > 0.2 || Math.sin(Math.atan2(u[2], u[1]) * 9) > 0.6 ? C.d : C.b) }), draw: anQuad, sh: [0.22, 0.1] });
+anDef('echidna', { th: 'ตัวกินมดหนาม', en: 'echidna', fact: 'สัตว์เลี้ยงลูกด้วยน้ำนมที่ออกลูกเป็นไข่ มีหนามทั้งตัว ใช้จมูกยาวและลิ้นจับมด', hint: 'เดินต้วมเตี้ยม จมูกยาวดุนหามด แตะแล้วม้วนตัวเป็นก้อนหนาม', kw: 'อีคิดนา โมโนทรีม ออกลูกเป็นไข่ หนาม กินมด', go: 'walk', spd: 0.05, fast: 0.05, stride: 0.12, turn: 1.4, roam: 0.12, R: 0.42, tz: 0.08, react: 'hide',
+  loop: [['go', 5], ['sniff', 4]], acts: { go: 'เดินต้วมเตี้ยม', sniff: 'ใช้จมูกดุนหามด', hide: 'ม้วนตัวเป็นก้อนหนาม' }, C: { b: '#5A4636', b2: '#7A6450', d: '#2E241C' },
+  Q: Object.assign({}, AN.pangolin.Q, { bx: 0.13, by: 0.09, bz: 0.08, zh: 0.1, fx: 0.08, hx: -0.08, hy: 0.06, fy: 0.08, fz: 0.09, hz: 0.1, l1: 0.05, l2: 0.05, sx: 0.12, sz: 0.11, coat: null, spines: true, head: AN_SNOUT_HEAD(0.08, 0.016), tail: anTailNone, extra: anSpines(70, 0.05) }), draw: anQuad, sh: [0.16, 0.1] });
+/* a seal hauls itself along on its belly, front flippers pushing; it lifts its head to look; touched, it scoots away */
+function anSeal(b, s, C, D) {
+  const mv = Math.min(1.4, s.mv), n = 10, pts = [], gal = Math.sin(s.ph) * 0.03 * mv, look = s.act === 'look' ? anBell(s.ap, 0.2) : 0;
+  for (let i = 0; i <= n; i++) { const u = i / n, lift = (u < 0.3 ? (0.3 - u) / 0.3 : 0) * (0.06 + 0.12 * look); pts.push([0.3 - 0.62 * u, 0, 0.07 + lift + gal * Math.sin(u * 3.14 + s.ph) - 0.03 * u]); }
+  b.tube(pts, (t) => { const r = 0.075 * Math.pow(Math.sin(Math.PI * Math.min(1, t * 0.85 + 0.12)), 0.6) * (t > 0.8 ? 1 - (t - 0.8) * 2.5 : 1); return [r * 1.05, r]; }, (t, a) => (Math.sin(a) < -0.3 ? C.b2 : Math.sin(t * 40) * Math.cos(a * 5) > 0.6 ? C.d : C.b), { sides: 10 });
+  const H = pts[0];
+  for (const sd of [1, -1]) { b.eye(anAdd(H, [0.0, sd * 0.035, 0.02]), 0.012, [0.5, sd, 0.3]); for (const dz of [-0.005, 0.005]) b.line([anAdd(H, [0.04, sd * 0.012, -0.01 + dz]), anAdd(H, [0.06, sd * 0.06, -0.012 + dz * 3])], 'rgba(60,60,70,0.55)', 0.002); }
+  b.ball(anAdd(H, [0.06, 0, -0.005]), 0.009, '#1E1A18');
+  for (const sd of [1, -1]) { const p = pts[3], f = 0.3 * Math.sin(s.ph + (sd > 0 ? 0 : 3)) * mv; b.sheet([anAdd(p, [0.02, sd * 0.06, -0.04]), anAdd(p, [-0.03 + f * 0.05, sd * 0.11, -0.065]), anAdd(p, [-0.05, sd * 0.07, -0.05])], C.d); }
+  const T = pts[n]; for (const sd of [1, -1]) b.sheet([T, anAdd(T, [-0.08, sd * 0.06, 0.0]), anAdd(T, [-0.07, sd * 0.01, -0.01])], C.d);
+}
+anDef('seal', { th: 'แมวน้ำ', en: 'seal', fact: 'สัตว์กินเนื้อที่อยู่ในน้ำ มีไขมันหนาใต้ผิวหนังกันหนาว ใช้ครีบว่ายน้ำ', hint: 'คืบด้วยท้องบนบก เงยหน้ามอง แตะแล้วคืบหนีเร็ว ๆ', kw: 'สิงโตทะเล สวนสัตว์ สัตว์ทะเล', go: 'walk', spd: 0.07, fast: 0.25, stride: 0.2, turn: 1.4, roam: 0.18, R: 0.6, tz: 0.1, react: 'flee', fleeLen: 0.3,
+  loop: [['go', 4], ['look', 3], ['rest', 3]], acts: { go: 'คืบด้วยท้อง', look: 'เงยหน้ามอง', rest: 'นอนพัก', flee: 'คืบหนีเร็ว ๆ' }, C: { b: '#7E8690', b2: '#C8CCD0', d: '#4A5058' }, draw: anSeal, ground: anPond, sh: [0.3, 0.1] });
+/* birds that cannot fly: big body, small wings, long strong legs; the kiwi is small with a long thin beak */
+const AN_QOST = Object.assign({}, AN_QHEN, { zb: 0.95, br: [0.33, 0.24, 0.24], k: 2.8, ws: 0.3, step: 0.2, lift: 0.12, nx: 0.12, nz: 0.48, nr: 0.035, hr: [0.06, 0.045, 0.05], pr: 5, bob: false,
+  head: (b, s, C) => { b.ell([0.07, 0, -0.01], [0.04, 0.03, 0.012], null, '#D8B8A0', { n1: 5, n2: 7 }); },
+  tail: (b, s, C) => { for (let i = -2; i <= 2; i++) b.sheet([[-0.28, i * 0.04, 0.05], [-0.42, i * 0.07, 0.12 - Math.abs(i) * 0.02], [-0.36, i * 0.05, 0.0]], C.w); } });
+anDef('ostrich', { th: 'นกกระจอกเทศ', en: 'ostrich', fact: 'นกที่ใหญ่ที่สุดและวิ่งเร็วที่สุด บินไม่ได้ ไข่ใหญ่ที่สุด', hint: 'เดินก้าวยาว ก้มจิกหาอาหาร แตะแล้ววิ่งหนีเร็วมาก', kw: 'นกบินไม่ได้ แอฟริกา สวนสัตว์', go: 'walk', spd: 0.2, fast: 0.8, stride: 0.5, turn: 1.8, roam: 0.22, R: 1.3, tz: 0.65, react: 'flee', fleeLen: 0.6,
+  loop: [['go', 4], ['peck', 3.5], ['look', 2], ['go', 3]], acts: { go: 'เดินก้าวยาว', peck: 'ก้มจิกหาอาหาร', flee: 'วิ่งหนีเร็วมาก' }, C: { b: '#2A2624', b2: '#3A3430', w: '#F2EEE6', f: '#C8A8A0', n: '#D8B8A8', t: '#F2EEE6' },
+  Q: AN_QOST, draw: anBird, props: anGrassField, sh: [0.4, 0.22] });
+anDef('emu', { th: 'นกอีมู', en: 'emu', fact: 'นกบินไม่ได้ของออสเตรเลีย ตัวผู้เป็นผู้ฟักไข่และเลี้ยงลูก', hint: 'เดินจิกกิน ขนฟูสีน้ำตาล แตะแล้ววิ่งหนี', kw: 'นกบินไม่ได้ ออสเตรเลีย สวนสัตว์', go: 'walk', spd: 0.18, fast: 0.7, stride: 0.45, turn: 1.8, roam: 0.22, R: 1.15, tz: 0.55, react: 'flee', fleeLen: 0.55,
+  loop: [['go', 4], ['peck', 4], ['look', 2]], acts: { go: 'เดินก้าวยาว', peck: 'ก้มจิกหาอาหาร', flee: 'วิ่งหนี' }, C: { b: '#6A5640', b2: '#7A6650', w: '#6A5640', f: '#5A5048', n: '#7A8AA0', t: '#6A5640' },
+  Q: Object.assign({}, AN_QOST, { zb: 0.8, br: [0.28, 0.2, 0.22], k: 2.4, nz: 0.38, tail: (b, s, C) => b.ell([-0.24, 0, -0.02], [0.08, 0.15, 0.12], null, C.b, { n1: 6, n2: 8 }) }), draw: anBird, props: anGrassField, sh: [0.35, 0.2] });
+anDef('cassowary', { th: 'นกคาสโซวารี', en: 'cassowary', fact: 'นกบินไม่ได้ มีหงอนแข็งบนหัว เล็บเท้ายาวคมมาก', hint: 'เดินหาผลไม้ หงอนแข็งบนหัว คอสีฟ้า แตะแล้วยืดตัวขู่ แล้ววิ่งหนี', kw: 'นกบินไม่ได้ เทา ภาคใต้ สวนสัตว์', go: 'walk', spd: 0.16, fast: 0.6, stride: 0.45, turn: 1.8, roam: 0.22, R: 1.15, tz: 0.55, react: 'threat', fleeLen: 0.5,
+  loop: [['go', 4], ['peck', 4], ['look', 2]], acts: { go: 'เดินหาผลไม้', peck: 'ก้มเก็บผลไม้', threat: 'ยืดตัวขู่ แล้ววิ่งหนี' }, C: { b: '#1E1C1C', b2: '#2A2626', w: '#1E1C1C', f: '#5A5048', n: '#3A7AC8', c: '#C83A2E', t: '#1E1C1C' },
+  Q: Object.assign({}, AN_QOST, { zb: 0.85, br: [0.3, 0.22, 0.24], k: 2.5, nz: 0.36,
+    head: (b, s, C) => { b.ell([0.07, 0, -0.01], [0.04, 0.025, 0.012], null, '#3A3430', { n1: 5, n2: 7 }); b.ell([0.0, 0, 0.07], [0.05, 0.015, 0.06], anRy(-0.4), '#8A6A3A', { n1: 6, n2: 8 }); b.ell([0.02, 0, -0.08], [0.015, 0.02, 0.04], null, C.c, { n1: 4, n2: 6 }); },
+    tail: (b, s, C) => b.ell([-0.26, 0, -0.04], [0.08, 0.16, 0.14], null, C.b, { n1: 6, n2: 8 }) }), draw: anBird, sh: [0.35, 0.2] });
+anDef('kiwi', { th: 'นกกีวี', en: 'kiwi', fact: 'นกบินไม่ได้ของนิวซีแลนด์ รูจมูกอยู่ปลายจะงอยปาก หากินกลางคืนด้วยกลิ่น', hint: 'เดินต้วมเตี้ยม ใช้ปากยาวจิ้มหาไส้เดือนในดิน แตะแล้ววิ่งหนี', kw: 'นกบินไม่ได้ นิวซีแลนด์', go: 'walk', spd: 0.08, fast: 0.35, stride: 0.12, turn: 2.4, roam: 0.14, R: 0.32, tz: 0.1, react: 'flee', fleeLen: 0.3,
+  loop: [['go', 3], ['peck', 4], ['look', 2]], acts: { go: 'เดินต้วมเตี้ยม', peck: 'ใช้ปากจิ้มหาไส้เดือนในดิน', flee: 'วิ่งหนี' }, C: { b: '#7A6448', b2: '#8A7458', f: '#C8B49A', n: '#7A6448' },
+  Q: Object.assign({}, AN_QHEN, { zb: 0.12, br: [0.1, 0.08, 0.08], k: 1.1, noWings: true, nx: 0.02, nz: 0.03, nr: 0.045, hr: [0.035, 0.03, 0.03], step: 0.05, lift: 0.03, pr: 4, bob: false,
+    head: (b, s, C) => b.tube([[0.03, 0, -0.005], [0.08, 0, -0.025], [0.13, 0, -0.05]], (t) => 0.006 * (1 - 0.6 * t), C.f, { sides: 5 }), tail: () => {} }), draw: anBird, ground: anSoil, sh: [0.11, 0.08] });
+anDef('peacock', { th: 'นกยูง', en: 'peacock', fact: 'ตัวผู้รำแพนหางที่มีลายวงคล้ายตาเพื่อดึงดูดตัวเมีย ตัวอย่างการคัดเลือกทางเพศ', hint: 'เดินลากหางยาว รำแพนหางเป็นวงกว้าง แตะแล้ววิ่งหนี', kw: 'นกยูงไทย สวนสัตว์ รำแพน', go: 'walk', spd: 0.12, fast: 0.5, stride: 0.16, turn: 2, roam: 0.18, R: 0.75, tz: 0.3, react: 'flee', fleeLen: 0.4,
+  loop: [['go', 4], ['peck', 3], ['display', 7], ['go', 3]], acts: { peck: 'จิกกินอาหาร', display: 'รำแพนหาง', flee: 'วิ่งหนี' }, C: { b: '#2A5AA8', b2: '#3A6A8A', w: '#8A7450', f: '#8A8070', n: '#2A6AB8', t: '#3E7A4A' },
+  Q: Object.assign({}, AN_QHEN, { zb: 0.3, br: [0.17, 0.1, 0.11], k: 1.2, nx: 0.06, nz: 0.18, nr: 0.03, hr: [0.045, 0.032, 0.035], bob: true,
+    head: (b, s, C) => { AN_BEAK(0.035, 0.012, '#8A8070')(b); for (let i = -1; i <= 1; i++) b.line([[-0.01, i * 0.008, 0.03], [-0.02, i * 0.012, 0.07]], '#2A6AB8', 0.003); },
+    tail: (b, s, C, D) => { const dsp = s.act === 'display' ? anBell(s.ap, 0.15) : 0;
+      for (let i = 0; i < 15; i++) { const a = (i / 14 - 0.5) * (0.35 + 2.75 * dsp), up = -0.22 + 1.75 * dsp, L = 0.5, tip = [-0.14 - Math.cos(up) * L * Math.cos(a), Math.sin(a) * L, -0.02 + Math.sin(up) * L * Math.cos(a) * 0.95 + 0.01 * Math.sin(s.t * 6 + i) * dsp];
+        b.sheet([[-0.12, 0, 0.02], anAdd(tip, [0, 0.03, 0]), anAdd(tip, [0, -0.03, 0])], C.t, { edge: false }); b.ball(anLerp([-0.12, 0, 0.02], tip, 0.92), 0.016, '#2A4AA8'); } } }), draw: anBird, sh: [0.25, 0.15] });
+anDef('flamingo', { th: 'นกฟลามิงโก', en: 'flamingo', fact: 'สีชมพูมาจากสารสีในกุ้งและสาหร่ายที่กิน ยืนขาเดียวได้นาน', hint: 'ลุยน้ำ ก้มหัวกรองอาหาร ยืนขาเดียว แตะแล้วบินหนี', kw: 'ฟลามิงโก สวนสัตว์ นกลุยน้ำ', go: 'walk', air: true, spd: 0.1, fast: 0.7, stride: 0.25, turn: 1.8, roam: 0.18, zLo: 0.6, zHi: 0.75, R: 0.85, tz: 0.4, react: 'flyoff', fleeLen: 0.4,
+  loop: [['go', 4], ['peck', 4], ['rest', 5]], acts: { go: 'ลุยน้ำ', peck: 'ก้มหัวกรองอาหาร', rest: 'ยืนขาเดียว', flyoff: 'บินหนี', land: 'ร่อนลง' }, C: { b: '#F0A0A8', b2: '#F6C0C4', w: '#E87888', f: '#E08A90', n: '#F0A0A8', t: '#E87888' },
+  Q: Object.assign({}, AN_QHEN, { zb: 0.62, br: [0.15, 0.09, 0.1], k: 1.3, ws: 0.32, oneLeg: true, nx: 0.08, nz: 0.3, nr: 0.022, hr: [0.035, 0.025, 0.028], pr: 3, bob: false, flap: 4,
+    head: (b, s, C) => b.tube([[0.03, 0, 0], [0.06, 0, -0.01], [0.075, 0, -0.04]], (t) => 0.012 * (1 - 0.6 * t), '#2A2420', { sides: 5 }),
+    tail: (b, s, C) => b.sheet([[-0.13, 0.03, 0.02], [-0.2, 0, 0.02], [-0.13, -0.03, 0.02]], C.w) }), draw: anBird, ground: anPond, sh: [0.2, 0.12] });
+anDef('parrot', { th: 'นกแก้ว', en: 'parrot', fact: 'จะงอยปากงุ้มแข็งกะเทาะเมล็ด นิ้วหน้าสองหลังสอง เลียนเสียงได้', hint: 'กระโดดเดิน ใช้ปากงุ้มกะเทาะเมล็ด แตะแล้วบินหนี แล้วร่อนลงที่ใหม่', kw: 'นกแก้วมาคอว์ สวนสัตว์ เลียนเสียง', go: 'hop', air: true, spd: 0.3, fast: 0.9, hopLen: 0.1, hopH: 0.035, hopT: 0.25, hopRest: 0.5, turn: 5, roam: 0.18, zLo: 0.25, zHi: 0.55, R: 0.36, tz: 0.15, react: 'flyoff',
+  loop: [['go', 2.5], ['peck', 3], ['look', 2]], acts: { go: 'กระโดดเดิน', peck: 'กะเทาะเมล็ด', look: 'เอียงคอมอง', flyoff: 'บินหนี', land: 'ร่อนลง' }, C: { b: '#3AA05A', b2: '#8AC85A', w: '#2A6AC8', f: '#5A5048', n: '#D83A2E', t: '#2A6AC8' },
+  Q: Object.assign({}, AN.bird.Q, { zb: 0.1, br: [0.09, 0.055, 0.06], k: 0.55, ws: 0.18, nx: 0.025, nz: 0.05, nr: 0.035, hr: [0.04, 0.034, 0.036],
+    head: (b, s, C) => b.tube([[0.03, 0, 0.005], [0.05, 0, 0.0], [0.055, 0, -0.025], [0.045, 0, -0.035]], (t) => 0.014 * (1 - 0.8 * t), '#E6DED0', { sides: 6 }),
+    tail: (b, s, C) => b.sheet([[-0.07, 0.015, 0.0], [-0.2, 0.012, -0.03], [-0.2, -0.012, -0.03], [-0.07, -0.015, 0.0]], C.t) }), draw: anBird, sh: [0.08, 0.05] });
+
+/* the groups taught at school: mammals by how their young are born and by order, birds that fly or cannot */
+const AN_GROUP = {
+  'สัตว์เลี้ยงลูกด้วยน้ำนม ออกลูกเป็นไข่': ['platypus', 'echidna'], 'สัตว์เลี้ยงลูกด้วยน้ำนม มีกระเป๋าหน้าท้อง': ['kangaroo'],
+  'สัตว์เลี้ยงลูกด้วยน้ำนม กินมดและปลวก': ['anteater', 'pangolin'], 'สัตว์เลี้ยงลูกด้วยน้ำนม ฟันแทะ': ['rat'], 'สัตว์เลี้ยงลูกด้วยน้ำนม บินได้': ['bat'],
+  'สัตว์เลี้ยงลูกด้วยน้ำนม กินเนื้อ': ['cat', 'dog', 'lion', 'tiger', 'bear', 'panda', 'seal'],
+  'สัตว์เลี้ยงลูกด้วยน้ำนม มีกีบ': ['cow', 'buffalo', 'horse', 'zebra', 'pig', 'goat', 'deer', 'camel', 'giraffe', 'hippo', 'rhino'], 'สัตว์เลี้ยงลูกด้วยน้ำนม มีงวง': ['elephant'],
+  'สัตว์เลี้ยงลูกด้วยน้ำนม ในน้ำ': ['dolphin', 'whale'], 'สัตว์เลี้ยงลูกด้วยน้ำนม ไพรเมต': ['monkey', 'orangutan'],
+  'สัตว์ปีก (นก)': ['chicken', 'duck', 'bird', 'owl', 'peacock', 'flamingo', 'parrot'], 'สัตว์ปีก (นกที่บินไม่ได้)': ['penguin', 'ostrich', 'emu', 'cassowary', 'kiwi']
+};
+for (const g in AN_GROUP) for (const k of AN_GROUP[g]) if (AN[k]) AN[k].grp = g;
+
 /* the trait the questions ask about, for the first animals */
 const AN_FACT = {
   cow: 'กินพืช กระเพาะมีสี่ห้อง เคี้ยวเอื้อง', buffalo: 'กินพืช เคี้ยวเอื้อง ชอบแช่ปลักโคลนระบายความร้อน', elephant: 'งวงคือจมูกกับริมฝีปากบนที่ยาวออก งาคือฟันตัด',
@@ -1287,6 +1790,26 @@ const AN_FACT = {
 for (const k in AN_FACT) if (AN[k] && !AN[k].fact) AN[k].fact = AN_FACT[k];
 
 /* ==== more animals go above this line ==== */
+/* a small picture of an animal for the shape tool: drawn once here, side on, in pencil; only=true asks for one already made */
+const AN_THUMBS = new Map();
+function anThumb(id, only) {
+  if (AN_THUMBS.has(id) || only) return AN_THUMBS.get(id) || '';
+  const D = AN[id]; if (!D) return '';
+  let url = '';
+  try {
+    /* drawn big, then cut to the animal and fitted into the picture, whatever its size and height */
+    const W = 280, H = 210, cv = document.createElement('canvas'); cv.width = W; cv.height = H; const c = cv.getContext('2d');
+    /* seen from its left side, a little from the front, whichever way it starts facing */
+    const an = anNew(D), r = { st: { t: 0, an }, cam: { yaw: an.h + Math.PI - 0.5, pitch: 0.28, zoom: 1.2 } };
+    anDraw(c, W, H, { animal: id, pen: true, clean: true, thumb: true }, r);
+    const d = c.getImageData(0, 0, W, H).data; let x0 = W, y0 = H, x1 = 0, y1 = 0;
+    for (let y = 0; y < H; y += 2) for (let x = 0; x < W; x += 2) if (d[(y * W + x) * 4 + 3] > 30) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+    const w = 112, h = 84, out = document.createElement('canvas'); out.width = w; out.height = h;
+    if (x1 > x0) { const bw = x1 - x0 + 6, bh = y1 - y0 + 6, k = Math.min((w - 6) / bw, (h - 6) / bh, 2.5); out.getContext('2d').drawImage(cv, x0 - 3, y0 - 3, bw, bh, (w - bw * k) / 2, (h - bh * k) / 2, bw * k, bh * k); }
+    url = out.toDataURL('image/png');
+  } catch (e) { url = ''; }
+  AN_THUMBS.set(id, url); return url;
+}
 /* the list for the picker of models and for the shape tool: [id, Thai name, what it does, other words, group] */
 const AN_LIST = Object.keys(AN).map((k) => [k, AN[k].th, AN[k].hint, AN[k].kw || '', AN[k].grp]);
 function anSpec(id) { const D = AN[id]; return D ? { domain: 'bio', dim: 3, title: D.th, animal: id, clean: true, pen: true, mark: 'ani' } : null; }
