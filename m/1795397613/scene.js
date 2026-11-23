@@ -130,11 +130,13 @@ function phAdd(b, k, fx, fy) { const o = b.F[k] || (b.F[k] = [0, 0]); o[0] += fx
 /* ---------- a person: the centre of mass moves by mechanics (inverted pendulum when walking, spring-mass when running,
    free flight when jumping, rotation about the feet when falling); arms and legs follow it; the ground force comes
    out of the motion itself: N = m(g + ay), friction = m ax ---------- */
-function psGround(sp, x) { let best = null; for (const s of sp.surfaces) { if (Math.abs(s.y2 - s.y1) > Math.abs(s.x2 - s.x1) * 0.2) continue; const a = Math.min(s.x1, s.x2), b = Math.max(s.x1, s.x2); if (x < a || x > b) continue; const y = s.y1 + (s.y2 - s.y1) * (x - s.x1) / ((s.x2 - s.x1) || 1); if (best == null || y > best) best = y; } return best == null ? 0 : best; }
+function psGround(sp, x) { let best = null; for (const s of sp.surfaces) { if (Math.abs(s.y2 - s.y1) > Math.abs(s.x2 - s.x1) * 0.2) continue; const a = Math.min(s.x1, s.x2), b = Math.max(s.x1, s.x2); if (x < a || x > b) continue; const y = s.y1 + (s.y2 - s.y1) * (x - s.x1) / ((s.x2 - s.x1) || 1); if (s._pg && sp._gl != null && y > sp._gl + sp._gs) continue; /* out on the paper (pagewalk.js): not a line or a box over its head */ if (best == null || y > best) best = y; } return best == null ? 0 : best; }
 function psKin(b, sp, t) {
-  const g = sp.world.g || 9.8, H = b.hgt, Lg = 0.5 * H, ys = Lg * 0.98, x0 = b.x0, gr = psGround(sp, x0);
+  const g = sp.world.g || 9.8, H = b.hgt, Lg = 0.5 * H, ys = Lg * 0.98, x0 = b.x0; let gr = psGround(sp, x0);
   const K = { hx: x0, hy: gr + ys, fl: [x0 - 0.06 * H, gr], fr: [x0 + 0.06 * H, gr], lean: 0, swing: 0, air: false, tuck: 0, phase: 'ยืน', rot: 0 };
   const walkLike = (v, tt, run) => {
+    /* out on the paper (pagewalk.js) the ground is what is under it where it walks now, not where it started */
+    if (sp._gl != null) gr = psGround(sp, x0 + v * tt);
     if (!run) {
       const sl = 0.42 * H, xh = x0 + v * tt, k = Math.floor((xh - x0) / sl), xf = x0 + sl * (k + 0.5), u = ((xh - x0) / sl) - k;
       /* the hip rises over the stance leg and dips when both feet are down: about 5 cm up and down per step */
@@ -551,7 +553,7 @@ function scRuntime(it) {
   return r;
 }
 function scReset(it, r) {
-  const sp = it.spec; r.traces = {}; r.ended = false; r.E0 = null; r.mir = null; r.peek = 0; r.turning = null; r.turned = false; r.bind = null; r.back = null; r.roll = 0; r.lastPos = null;
+  const sp = it.spec; r.traces = {}; r.ended = false; r.E0 = null; r.mir = null; r.peek = 0; r.turning = null; r.turned = false; r.bind = null; r.back = null; r.roll = 0; r.lastPos = null; r.pwSkip = null;
   if (sp.dim === 3) { sc3Reset(sp, r); return; }
   if (sp.domain === 'phys') {
     r.st = phInit(sp);
@@ -565,6 +567,19 @@ function scReset(it, r) {
   } else if (sp.domain === 'math') { r.st = { t: sp.t.min }; }
   else r.st = ptInit(sp);
 }
+/* a drawing that moves by physics, out on the paper (pagewalk.js, switch "pagemove"): the lines and boxes of the page round
+   it are surfaces too, also those drawn after it started; else the model as it was made */
+function scPageSpec(it, r, sp) { if (!sp.bare || !pwOn()) return sp; try { return pwSpec(it, r, sp); } catch (e) { return sp; } }
+/* one frame of a physics model (also driven step by step by the tests): true when it has drawn itself this frame */
+function scPhysTick(it, r, sp, dtw) {
+  if (r.turning != null) { r.turning += dtw / 0.4; if (r.turning >= 0.5 && !r.turned) { ipTurn(it, r); r.turned = true; } if (r.turning >= 1) { r.turning = null; r.turned = false; } scRender(it, r); return true; } if (r.peek) { r.peek -= dtw; if (r.peek <= 0) { r.peek = 0; r.turning = 0; r.turned = false; } scRender(it, r); return true; } const sim = dtw * (sp.speed || 1) * (r.slow ? 0.25 : 1), n = Math.max(1, Math.ceil(sim / 0.004)), spv = scPageSpec(it, r, sp); for (let i = 0; i < n; i++) phStep(spv, r.st, sim / n); for (const b of r.st.bodies) { b.trail.push([b.x, b.y]); if (b.trail.length > 400) b.trail.shift(); }
+      const pick = sp.show.graph; if (pick !== 'none') { r.st.hist.push([r.st.t].concat(r.st.bodies.filter((b) => !b.fixed).map((b) => pick === 'x' ? b.x : pick === 'y' ? b.y : pick === 'vx' ? b.vx : pick === 'vy' ? b.vy : pick === 'grf' ? (b.F.N ? b.F.N[1] : 0) : Math.hypot(b.vx, b.vy)))); if (r.st.hist.length > 600) r.st.hist.shift(); }
+      const [x0, y0, x1, y1] = phBounds(sp, r.st), far = sp.bare ? 0.3 : Math.max(x1 - x0, y1 - y0) * 3; const edge = sp.bare && it.rig && it.rig.edge;
+      if (sp.bare && it.rig && it.rig.kind === 'person') ipSense(it, r);
+      if (edge && edge !== 'stay') ipEdge(it, r, x0, x1);
+      else if (sp.bare && r.st.bodies.some((b) => b.shape === 'person' && (b.x < x0 - 0.5 || b.x > x1 + 0.5))) { r.playing = false; r.ended = true; } if (!r.st.bodies.some((b) => b.shape === 'person') && r.st.bodies.every((b) => b.fixed || b.x < x0 - far || b.x > x1 + far || b.y < y0 - far || b.y > y1 + far)) { r.playing = false; r.ended = true; }
+  return false;
+}
 function scTick(ts) {
   scnRaf = 0; const dtw = scnLast ? Math.min(0.05, (ts - scnLast) / 1000) : 0.016; scnLast = ts; let any = false;
   for (const [id, r] of SCN) {
@@ -572,12 +587,7 @@ function scTick(ts) {
     if (!r.cv || !r.cv.isConnected) continue;
     any = true; if (offView(r.cv)) continue; const sp = it.spec;
     if (sp.dim === 3) { if (sc3Tick(sp, r, dtw, it) !== false) scRender(it, r); continue; }
-    if (sp.domain === 'phys') { if (r.turning != null) { r.turning += dtw / 0.4; if (r.turning >= 0.5 && !r.turned) { ipTurn(it, r); r.turned = true; } if (r.turning >= 1) { r.turning = null; r.turned = false; } scRender(it, r); continue; } if (r.peek) { r.peek -= dtw; if (r.peek <= 0) { r.peek = 0; r.turning = 0; r.turned = false; } scRender(it, r); continue; } const sim = dtw * (sp.speed || 1) * (r.slow ? 0.25 : 1), n = Math.max(1, Math.ceil(sim / 0.004)); for (let i = 0; i < n; i++) phStep(sp, r.st, sim / n); for (const b of r.st.bodies) { b.trail.push([b.x, b.y]); if (b.trail.length > 400) b.trail.shift(); }
-      const pick = sp.show.graph; if (pick !== 'none') { r.st.hist.push([r.st.t].concat(r.st.bodies.filter((b) => !b.fixed).map((b) => pick === 'x' ? b.x : pick === 'y' ? b.y : pick === 'vx' ? b.vx : pick === 'vy' ? b.vy : pick === 'grf' ? (b.F.N ? b.F.N[1] : 0) : Math.hypot(b.vx, b.vy)))); if (r.st.hist.length > 600) r.st.hist.shift(); }
-      const [x0, y0, x1, y1] = phBounds(sp, r.st), far = sp.bare ? 0.3 : Math.max(x1 - x0, y1 - y0) * 3; const edge = sp.bare && it.rig && it.rig.edge;
-      if (sp.bare && it.rig && it.rig.kind === 'person') ipSense(it, r);
-      if (edge && edge !== 'stay') ipEdge(it, r, x0, x1);
-      else if (sp.bare && r.st.bodies.some((b) => b.shape === 'person' && (b.x < x0 - 0.5 || b.x > x1 + 0.5))) { r.playing = false; r.ended = true; } if (!r.st.bodies.some((b) => b.shape === 'person') && r.st.bodies.every((b) => b.fixed || b.x < x0 - far || b.x > x1 + far || b.y < y0 - far || b.y > y1 + far)) { r.playing = false; r.ended = true; } }
+    if (sp.domain === 'phys') { if (scPhysTick(it, r, sp, dtw)) continue; }
     else if (sp.domain === 'math') { r.st.t += dtw * sp.t.speed * (r.slow ? 0.25 : 1); if (r.st.t > sp.t.max) { if (sp.t.loop) { r.st.t = sp.t.min; r.traces = {}; } else { r.st.t = sp.t.max; r.playing = false; r.ended = true; } } }
     else { const sim = dtw * (r.slow ? 0.25 : 1), n = Math.max(1, Math.ceil(sim / 0.01)); for (let i = 0; i < n; i++) ptStep(sp, r.st, sim / n); if (!r.st.lastH || r.st.t - r.st.lastH > 0.2) { r.st.lastH = r.st.t; r.st.hist.push([r.st.t].concat(sp.species.map((_, i) => r.st.P.filter((p) => p.s === i).length))); if (r.st.hist.length > 500) r.st.hist.shift(); } }
     if (sp.bare && r.ended) { /* left the paper: come back to where it was drawn and, like a moving picture, play again */ scReset(it, r); r.playing = animOn(); const pb = itemsEl.querySelector('.item[data-id="' + id + '"] [data-s="play"]'); if (pb) pb.textContent = r.playing ? 'หยุด' : 'เล่น'; }
@@ -587,10 +597,16 @@ function scTick(ts) {
 }
 function scRender(it, r) {
   const cv = r.cv; if (!cv) return; const sp = it.spec;
-  const w = cv.clientWidth || 520, h = cv.clientHeight || 320, dpr = Math.min(4, (window.devicePixelRatio || 1) * Math.max(1, (S.base || 1) * (S.zoom || 1)), sp.animal ? Math.sqrt(1.2e6 / Math.max(1, w * h)) : 4); /* an animal moves all the time: its canvas has at most 1.2 million pixels */
+  if (sp.animal && r.box && r.box.isConnected) return anRender(it, r);
+  let w = cv.clientWidth || 520, h = cv.clientHeight || 320; const dpr = Math.min(4, (window.devicePixelRatio || 1) * Math.max(1, (S.base || 1) * (S.zoom || 1)), sp.animal ? Math.sqrt(1.2e6 / Math.max(1, w * h)) : 4); /* an animal moves all the time: its canvas has at most 1.2 million pixels */
   if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); }
   let c = cv.getContext('2d');
-  if (sp.bare) { const cap = Math.min(dpr, Math.sqrt(9e6 / Math.max(1, w * h))); if (cv.width !== Math.round(w * cap) || cv.height !== Math.round(h * cap)) { cv.width = Math.round(w * cap); cv.height = Math.round(h * cap); } c.setTransform(cap, 0, 0, cap, 0, 0); c.clearRect(0, 0, w, h); }
+  /* a drawing moving by physics, out on the paper (pagewalk.js): its canvas covers the page from the top, so a body that
+     goes up past where its box begins (thrown high, up onto a line) is still drawn whole; the world is mapped as before */
+  let pwTop = 0;
+  if (sp.bare && pwOn()) { pwTop = Math.max(0, Math.round(it.y || 0)); const full = pwTop + (it.h || 400), k = pwTop + ':' + full; if (cv._pwb !== k) { cv._pwb = k; cv.style.marginTop = -pwTop + 'px'; cv.style.setProperty('height', full + 'px', 'important'); } h = full; } /* drawn up over the top of its box; its box keeps its height (a negative margin) */
+  else if (sp.bare && cv._pwb) { cv._pwb = null; cv.style.marginTop = ''; cv.style.removeProperty('height'); }
+  if (sp.bare) { const cap = Math.min(dpr, Math.sqrt(9e6 / Math.max(1, w * h))); if (cv.width !== Math.round(w * cap) || cv.height !== Math.round(h * cap)) { cv.width = Math.round(w * cap); cv.height = Math.round(h * cap); } c.setTransform(cap, 0, 0, cap, 0, 0); c.clearRect(0, 0, w, h); if (pwTop) { c.translate(0, pwTop); h -= pwTop; } }
   else if (sp.clean) { c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, cv.width, cv.height); c.setTransform(dpr, 0, 0, dpr, 0, 0); }
   else { c.setTransform(dpr, 0, 0, dpr, 0, 0); c.fillStyle = '#FFFFFF'; c.fillRect(0, 0, w, h); }
   if (sp.dim === 3) { if (sc3Render(c, w, h, sp, r) === false) loadLib('math').then(() => scRender(it, r)).catch(() => {}); if (r.ro) r.ro.innerHTML = (r.read || []).map(([k, v]) => '<span><b>' + esc(String(k)) + '</b> ' + esc(String(v)) + '</span>').join(''); return; }
@@ -611,6 +627,31 @@ function scRender(it, r) {
   if (r.ro) r.ro.innerHTML = (r.read || []).map(([k, v]) => '<span><b>' + esc(String(k)) + '</b> ' + esc(String(v)) + '</span>').join('');
 }
 
+/* the room round an animal's box where it is still drawn: [left, top, right, bottom], from the size of its box */
+function anMargin(w0, h0) { return [Math.round(w0 * 0.3), Math.round(h0 * 0.6), Math.round(w0 * 0.3), Math.round(h0 * 0.25)]; }
+/* an animal: drawn as w0 x h0 (its box) on a canvas that is bigger by anMargin all round and lies over the box */
+function anRender(it, r) {
+  const cv = r.cv, bx = r.box, sp = it.spec, w0 = bx.clientWidth || 340, h0 = bx.clientHeight || 255, g = r.anGrow || (r.anGrow = [0, 0, 0, 0]), m = anMargin(w0, h0).map((v, i) => v + g[i]), W2 = w0 + m[0] + m[2], H2 = h0 + m[1] + m[3];
+  const pos = [bx.offsetLeft - m[0], bx.offsetTop - m[1], W2, H2].join();
+  if (cv._pos !== pos) { cv._pos = pos; cv.style.left = (bx.offsetLeft - m[0]) + 'px'; cv.style.top = (bx.offsetTop - m[1]) + 'px'; cv.style.width = W2 + 'px'; cv.style.height = H2 + 'px'; }
+  r.anM = m;
+  /* the same sharpness as before for the box itself (at most 1.2 million pixels in it) */
+  const dpr = Math.min(4, (window.devicePixelRatio || 1) * Math.max(1, (S.base || 1) * (S.zoom || 1)), Math.sqrt(1.2e6 / Math.max(1, w0 * h0)));
+  if (cv.width !== Math.round(W2 * dpr) || cv.height !== Math.round(H2 * dpr)) { cv.width = Math.round(W2 * dpr); cv.height = Math.round(H2 * dpr); }
+  const c = cv.getContext('2d'); c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, cv.width, cv.height);
+  c.setTransform(dpr, 0, 0, dpr, m[0] * dpr, m[1] * dpr);
+  if (!sp.clean) { c.fillStyle = '#FFFFFF'; c.fillRect(0, 0, w0, h0); }
+  sc3Render(c, w0, h0, sp, r);
+  /* it went close to the edge of its canvas (a bird flying off high, a squid's cloud of ink): that side of the canvas grows,
+     and this picture is drawn again on it, so nothing of it is ever cut (owner 22 พ.ย. 2569) */
+  const bb = r.anBB;
+  if (bb && !r.anGrowing) {
+    const room = [m[0] + bb[0], m[1] + bb[2], w0 + m[2] - bb[1], h0 + m[3] - bb[3]], dim = [w0, h0, w0, h0]; let grew = false;
+    for (let i = 0; i < 4; i++) if (room[i] < 8 && g[i] < dim[i] * 2.5) { g[i] += Math.max(dim[i] * 0.3, 20 - room[i]); grew = true; }
+    if (grew) { r.anGrowing = 1; try { anRender(it, r); } finally { r.anGrowing = 0; } return; }
+  }
+  if (r.ro) r.ro.innerHTML = (r.read || []).map(([k, v]) => '<span><b>' + esc(String(k)) + '</b> ' + esc(String(v)) + '</span>').join('');
+}
 /* ---------- the box on the page ---------- */
 function buildScene(d, it, forExport) {
   it.spec = scClean(it.spec);
@@ -619,7 +660,11 @@ function buildScene(d, it, forExport) {
   const head = document.createElement('div'); head.className = 'gh';
   head.innerHTML = '<span></span>' + (forExport ? '' : '<span class="sbtns"><button type="button" data-s="play">เล่น</button><button type="button" data-s="reset">เริ่มใหม่</button><button type="button" data-s="slow" aria-pressed="false">ช้า</button>' + ((it.ink && it.ink.length) || (it.pics && it.pics.length) ? '<button type="button" data-s="back" title="เอาภาพเดิมกลับมาบนหน้า">คืนเป็นภาพวาด</button>' : '') + '</span>');
   head.firstChild.textContent = sp.title; d.appendChild(head);
-  const cv = document.createElement('canvas'); cv.className = 'simcv scncv'; d.appendChild(cv); r.cv = cv;
+  const cv = document.createElement('canvas'); cv.className = 'simcv scncv';
+  /* an animal is seen whole all the time (owner 22 พ.ย. 2569): its box is a place-holder (.anbox) and the canvas lies over
+     it with room all round, so a part that goes past the box is still drawn (anMargin) */
+  if (sp.animal && !forExport) { const bx = document.createElement('div'); bx.className = 'anbox'; d.appendChild(bx); cv.classList.add('anover'); r.box = bx; } else r.box = null;
+  d.appendChild(cv); r.cv = cv;
   if (!forExport && sp.domain !== 'math') {
     const tg = document.createElement('div'); tg.className = 'scntog';
     const tog = (label, get, set) => { const b = document.createElement('button'); b.type = 'button'; b.className = 'chip'; b.textContent = label; b.setAttribute('aria-pressed', get() ? 'true' : 'false'); b.onclick = () => { const live = findItem(it.id) || it; set(live.spec, !get(live.spec)); b.setAttribute('aria-pressed', get(live.spec) ? 'true' : 'false'); scRender(live, r); savePage(); }; tg.appendChild(b); };
@@ -721,7 +766,7 @@ function buildScene(d, it, forExport) {
         sb2.appendChild(st);
       }
     }
-    [...d.children].filter((x) => x !== cv).forEach((x) => pill.appendChild(x));
+    [...d.children].filter((x) => x !== cv && x !== r.box).forEach((x) => pill.appendChild(x));
     d.appendChild(hb); d.appendChild(pill);
   }
   if (sp.bare) {
@@ -742,7 +787,7 @@ function buildScene(d, it, forExport) {
     const fold = document.createElement('button'); fold.type = 'button'; fold.textContent = 'ย่อ'; fold.title = 'ย่อแถบนี้ เหลือปุ่มเล็กที่มุมภาพ'; fold.onclick = () => { r.open = false; pill.hidden = true; hb.setAttribute('aria-expanded', 'false'); };
     const del = document.createElement('button'); del.type = 'button'; del.textContent = 'ลบ'; del.onclick = () => { const live = findItem(it.id); if (!live) return; const before = clone(S.page.items || []); setItems(before.filter((t) => t.id !== it.id), before); SCN.delete(it.id); }; sb2.appendChild(del);
     sb2.appendChild(fold);
-    [...d.children].filter((x) => x !== cv).forEach((x) => pill.appendChild(x));
+    [...d.children].filter((x) => x !== cv && x !== r.box).forEach((x) => pill.appendChild(x));
     d.appendChild(hb); d.appendChild(pill);
   }
 }
@@ -1453,21 +1498,38 @@ function ipSense(it, r) {
   const mv = r.pcx == null ? 0 : cx - r.pcx; r.pcx = cx; if (Math.abs(mv) > 0.01) r.pdir = Math.sign(mv); const dir = r.pdir || 0; if (!dir) return;
   const reach = Math.max(8, bw * 0.25), f0 = dir > 0 ? box[2] : box[0], za = Math.min(f0, f0 + dir * reach), zb = Math.max(f0, f0 + dir * reach);
   const yTop = box[1] + bh * 0.05, feet = box[3];
+  /* out on the paper (pagewalk.js) a person steps up onto what is lower than a small step: that is not in its way */
+  const low = typeof pwOn === 'function' && pwOn() ? Math.max(3, 0.15 * (b.hgt || 1.7) * K) : 3;
   let hit = false;
   for (const rr of allStrokes()) {
     const q = sbox(rr.s), w = q[2] - q[0], h = q[3] - q[1], ground = (w > 2.5 * h && w > 60) || w > 260;
-    const yb = ground ? feet - bh * 0.35 : feet - 3;
+    const yb = ground ? feet - bh * 0.35 : feet - low;
     if (q[2] < za || q[0] > zb || q[3] < yTop || q[1] > yb) continue;
     if (typeof lifeTopIn === 'function' && lifeTopIn(rr.s, za, zb, yTop, yb) == null) continue;
     hit = true; break;
   }
   if (!hit) for (const o of (S.page && S.page.items) || []) {
-    if (o.id === it.id || o.lock) continue; const q = o.type === 'life' && o.B && typeof LIFE !== 'undefined' && LIFE.get(o.id) ? lifeBox(o, LIFE.get(o.id)) : (o.spec && o.spec.bare) ? null : itemBox(o);
-    if (!q || q[2] - q[0] < 4) continue; if (q[2] < za || q[0] > zb || q[3] < yTop || q[1] > feet - 3) continue; hit = true; break;
+    if (o.id === it.id || o.lock) continue; const q = o.type === 'life' && o.B && typeof LIFE !== 'undefined' && LIFE.get(o.id) ? lifeBox(o, LIFE.get(o.id)) : (o.spec && o.spec.bare) ? null : (o.spec && o.spec.animal && o.spec.clean && typeof anVis === 'function') ? anVis(o.id) : itemBox(o); /* an animal out on the paper: its body, not its empty box */
+    if (!q || q[2] - q[0] < 4) continue; if (q[2] < za || q[0] > zb || q[3] < yTop || q[1] > feet - (o.spec && o.spec.animal ? 3 : low)) continue; hit = true; break;
   }
   if (!hit) return;
   /* stop, a short startled pause, then turn round (the pause leads into the turn) */
   r.peek = 0.45;
+}
+/* every drawn picture that walks or rolls on the page (a person, a car, a ball): where it is on the page now, for the
+   animals out on the paper (animals.js anActors) */
+function ipActors() {
+  const out = [];
+  for (const [id, r] of SCN) {
+    const it = findItem(id); if (!it || !it.spec || !it.spec.bare || !r.st || !r.st.bodies || !r.cv || !r.cv.isConnected) continue;
+    const b = r.st.bodies.find((q) => q.shape === 'person' || !q.fixed); if (!b) continue;
+    const K = W / Math.max(1e-6, it.spec.world.w || 1), m = r.mir || { s: 1, O: 0 }, b0 = (it.spec.bodies || []).find((q) => q.id === b.id) || b;
+    if (!r.actB) r.actB = ipBox(it.ink || [], it.pics || []);
+    const B = r.actB, dx = m.s * b.x * K + m.O - b0.x * K, dy = -((b.y || 0) - (b0.y || 0)) * K;
+    const kind = it.rig && it.rig.kind === 'person' ? 'person' : it.rig && it.rig.wheels && it.rig.wheels.length ? 'vehicle' : b.shape === 'ball' ? 'ball' : 'thing';
+    out.push({ id, kind, box: [B[0] + dx, B[1] + dy, B[2] + dx, B[3] + dy], vx: (b.vx || 0) * K * m.s });
+  }
+  return out;
 }
 function ipShift(r, b, dx) { if (b.shape === 'person') b.x0 += dx; b.x += dx; }
 function ipTurn(it, r) {
@@ -2163,8 +2225,9 @@ function sc3Bind(cv, it, r) {
     const d0 = down; down = null; if (!d0 || d0[3] !== e.pointerId || pts.size) return;
     if (Math.hypot(e.clientX - d0[0], e.clientY - d0[1]) > 10 || now() - d0[2] > 450) return;
     const live = findItem(it.id) || it; if (!live.spec || !live.spec.animal || typeof anTap !== 'function') return;
-    const rc = cv.getBoundingClientRect(), x = (e.clientX - rc.left) * (cv.clientWidth / (rc.width || 1)), y = (e.clientY - rc.top) * (cv.clientHeight / (rc.height || 1));
-    if (!anTap(live.spec, r, x, y, cv.clientWidth, cv.clientHeight)) return;
+    const rc = cv.getBoundingClientRect(), m = r.box && r.anM ? r.anM : [0, 0], x = (e.clientX - rc.left) * (cv.clientWidth / (rc.width || 1)) - m[0], y = (e.clientY - rc.top) * (cv.clientHeight / (rc.height || 1)) - m[1];
+    const bw = r.box && r.anM ? r.box.clientWidth : cv.clientWidth, bh = r.box && r.anM ? r.box.clientHeight : cv.clientHeight; /* an animal: the size of its box, the canvas lies over it with room round it */
+    if (!anTap(live.spec, r, x, y, bw, bh)) return;
     if (!r.playing) { r.playing = true; const pb = itemsEl.querySelector('.item[data-id="' + it.id + '"] [data-s="play"]'); if (pb) pb.textContent = 'หยุด'; }
     if (!scnRaf) scnRaf = requestAnimationFrame(scTick);
   });
@@ -2436,10 +2499,22 @@ function lifeTarget(it, rt) {
 const LIFE_GROUND = ['walk4', 'drive', 'roll', 'hop', 'wiggle'];
 let lifeWorld = { t: 0, strokes: [], boxes: [] };
 function lifeWorldNow() {
-  const now = performance.now(); if (now - lifeWorld.t < 400) return lifeWorld;
+  const now = performance.now(), pw = pwOn();
+  /* out on the paper (pagewalk.js): a line or a box added or taken away is seen at once, not up to 0.4 s later */
+  const n = pw ? pwKey() : '';
+  if (now - lifeWorld.t < 400 && (!pw || lifeWorld.n === n)) return lifeWorld;
   const strokes = []; for (const r of allStrokes()) { const b = sbox(r.s), w = b[2] - b[0], h = b[3] - b[1]; strokes.push({ b, s: r.s, ground: (w > 2.5 * h && w > 60) || w > 260 }); }
-  const boxes = []; for (const it of (S.page && S.page.items) || []) { if (it.type === 'life' || it.lock || (it.spec && it.spec.bare)) continue; const b = itemBox(it); if (b[2] - b[0] > 4 && b[3] - b[1] > 4) boxes.push(b); }
-  lifeWorld = { t: now, strokes, boxes }; return lifeWorld;
+  /* out on the paper a frameless picture (an animal's empty box) is not a wall: the animal's body is met where it is (lifeMet) */
+  const boxes = []; for (const it of (S.page && S.page.items) || []) { if (it.type === 'life' || it.lock || (it.spec && it.spec.bare) || (pw && (isBgItem(it) || (it.spec && it.spec.clean)))) continue; const b = pw && (!it.type || it.type === 'text') ? tightItemBox(it) : itemBox(it); if (b[2] - b[0] > 4 && b[3] - b[1] > 4) boxes.push(b); }
+  lifeWorld = { t: now, strokes, boxes, n }; return lifeWorld;
+}
+/* the moving things out on the paper a living picture meets (pagewalk.js): the animals' bodies and the drawings that move
+   by physics, as [box, vx, kind] */
+function lifeMet() {
+  if (!pwOn()) return [];
+  const out = []; for (const A of pwAnimals()) out.push([A.box, A.vx, 'animal', A.id]);
+  if (typeof ipActors === 'function') { try { for (const o of ipActors()) out.push([o.box, o.vx || 0, o.kind, o.id]); } catch (e) { /* not ready */ } }
+  return out;
 }
 /* where this picture is on the page right now, roughly */
 function lifeBox(it, rt) { const B = it.B; if (it.beh && (it.beh.k === 'phys' || it.beh.k === 'path')) { const px = rt.px || 0, py = rt.py || 0; return [B[0] + px, B[1] + py, B[2] + px, B[3] + py]; } return [B[0] + (rt.dx || 0), B[1] + (rt.gy || 0) + (rt.alt || 0), B[2] + (rt.dx || 0), B[3] + (rt.gy || 0) + (rt.alt || 0)]; }
@@ -2461,6 +2536,8 @@ function lifeSense(it, rt, dt) {
   if (LIFE_GROUND.includes(k)) {
     const g0 = rt.gy || 0, up = Math.max(bh * 2, 120), xa = box[0] + bw * 0.25, xb = box[2] - bw * 0.25, ya = Math.max(B[3] - up, B[3] + g0 - bh * 0.6), yb = Math.min(B[3] + bh * 0.25, B[3] + g0 + bh * 0.25); let top = null;
     for (const o of Wd.strokes) { if (!o.ground) continue; const q = o.b; if (q[2] < xa || q[0] > xb || q[3] < ya || q[1] > yb) continue; const y = lifeTopIn(o.s, xa, xb, ya, yb); if (y != null && (top == null || y < top)) top = y; }
+    /* out on the paper the top of a box is ground too (pagewalk.js) */
+    if (pwOn()) for (const q of Wd.boxes) { if (q[2] < xa || q[0] > xb || q[1] < ya || q[1] > yb) continue; if (top == null || q[1] < top) top = q[1]; }
     /* with no line under it, it settles back down to where it was drawn */
     const tgt = top == null ? (g0 < 0 ? Math.min(0, g0 + bh * 0.25) : 0) : top - B[3];
     rt.gy = (rt.gy || 0) + (tgt - (rt.gy || 0)) * Math.min(1, dt * 8);
@@ -2478,18 +2555,23 @@ function lifeSense(it, rt, dt) {
     const topY = lifeTopIn(o.s, sa, sb, yTop, yb2);
     if (topY != null && tall(topY)) { hit = true; break; } }
   if (!hit) for (const q of Wd.boxes) { if (q[2] < za || q[0] > zb || q[3] < yTop || q[1] > yBot) continue; if (dir > 0 ? q[0] < box[2] - 4 : q[2] > box[0] + 4) continue; if (tall(q[1])) { hit = true; break; } }
+  /* an animal out on the paper or a drawing moving by physics in the way (pagewalk.js): each answers as the real thing would */
+  let met = null;
+  if (!hit) for (const m of lifeMet()) { const q = m[0]; if (q[2] < za || q[0] > zb || q[3] < yTop || q[1] > yBot) continue; if (dir > 0 ? q[0] + q[2] < box[0] + box[2] : q[0] + q[2] > box[0] + box[2]) continue; /* behind it */ if (!tall(q[1])) continue; hit = true; met = m; rt.met = m[3]; break; }
   if (!hit) for (const [id2, r2] of LIFE) { if (id2 === it.id) continue; const o = findItem(id2); if (!o || !o.beh || !o.B) continue; const q = lifeBox(o, r2);
     /* a loose physical thing in the way gets kicked or pushed along instead of being walked through */
     if (o.beh.k === 'phys') { if (q[2] < za || q[0] > zb || q[3] < yTop || q[1] > yBot) continue; if (r2.px == null) continue; if ((dir > 0 ? q[0] - box[2] : box[0] - q[2]) < -3) { hit = true; rt.met = id2; break; } /* it cannot move any further: it is in the way */ const push = Math.max(rt.v || 0, 60) * 1.6; if (dir > 0 ? r2.vx < push : r2.vx > -push) { r2.vx = dir * push; r2.vy = Math.min(r2.vy || 0, -push * 0.25); r2.sleep = 0; } rt.v *= 0.6; continue; } if (q[2] < za || q[0] > zb || q[3] < yTop || q[1] > yBot) continue; if (dir > 0 ? q[0] < box[2] - 4 : q[2] > box[0] + 4) continue; hit = true; rt.met = id2; break; }
   if (!hit) return;
   if (k === 'hop' && rt.hp % 1 > 0.05) return;
-  lifeReact(it, rt, k, 1);
+  lifeReact(it, rt, k, 1, met && met[2]);
 }
 
 /* how a living picture reacts when it runs into something, like the real thing would. Nothing passes through anything:
    boxed in on both sides it waits and looks around instead of walking through */
-function lifeReact(it, rt, k, hard) {
+function lifeReact(it, rt, k, hard, who) {
   if (rt.state === 'turn' || (rt.scare || 0) > 0.6) return;
+  /* a car that comes to an animal or a person stops and waits for it to go by (the second time it turns back) */
+  if (k === 'drive' && (who === 'animal' || who === 'person') && rt.t - (rt.lastWait || -9) > 4) { rt.lastWait = rt.t; rt.v = 0; rt.state = 'rest'; rt.st0 = rt.t; rt.restFor = 1.6; rt.turnAfter = false; rt.bump = 0.5; return; }
   const boxed = rt.t - (rt.lastBump || -9) < 1.2; rt.lastBump = rt.t;
   rt.bump = 1; rt.scare = Math.min(1, (rt.scare || 0) + 0.8 * hard);
   const bw = it.B[2] - it.B[0];
@@ -2506,9 +2588,11 @@ function lifeThreat(it, rt, dt) {
   if (rt.flinch) rt.flinch = Math.max(0, rt.flinch - dt * 1.4);
   const b = it.beh; if ((b.move && b.edge !== 'stay') || !lifeTouch(b)) return;
   const me = lifeBox(it, rt), cx = (me[0] + me[2]) / 2, cy = (me[1] + me[3]) / 2, sz = Math.max(me[2] - me[0], me[3] - me[1]);
-  for (const [id2, r2] of LIFE) {
-    if (id2 === it.id) continue; const o = findItem(id2); if (!o || !o.beh || !o.B) continue;
-    const q = lifeBox(o, r2), ox = (q[0] + q[2]) / 2, oy = (q[1] + q[3]) / 2, d = Math.hypot(ox - cx, oy - cy) - (sz + Math.max(q[2] - q[0], q[3] - q[1])) / 2;
+  /* an animal out on the paper or a moving drawing coming at it too (pagewalk.js) */
+  const near = []; for (const [id2, r2] of LIFE) { if (id2 === it.id) continue; const o = findItem(id2); if (!o || !o.beh || !o.B) continue; near.push([id2, lifeBox(o, r2)]); }
+  for (const m of lifeMet()) near.push([m[3], m[0]]);
+  for (const [id2, q] of near) {
+    const ox = (q[0] + q[2]) / 2, oy = (q[1] + q[3]) / 2, d = Math.hypot(ox - cx, oy - cy) - (sz + Math.max(q[2] - q[0], q[3] - q[1])) / 2;
     const seen = rt.seen || (rt.seen = {}), prev = seen[id2]; seen[id2] = [ox, oy];
     if (d > sz * 0.7 || !prev) continue;
     const closing = Math.hypot(prev[0] - cx, prev[1] - cy) - Math.hypot(ox - cx, oy - cy);
@@ -2548,10 +2632,26 @@ function lifeMove(it, rt, dt) {
   else if (b.edge === 'bounce') { const ahead = rt.v * rt.v / (2 * Math.max(1, acc * base * 0.6)); if ((rt.dir > 0 && right + ahead > W - 6) || (rt.dir < 0 && left - ahead < 6)) { if (k === 'hop' && rt.hp % 1 > 0.05) return; rt.state = 'turn'; rt.tp = 0; rt.flipped = false; } }
   else if (b.edge === 'peek') { if ((rt.dir > 0 && left + bw * 0.55 > W) || (rt.dir < 0 && right - bw * 0.55 < 0)) { rt.state = 'peek'; rt.st0 = rt.t; } }
 }
+/* does this picture leave the place where it was drawn (it travels, falls, follows a path, or climbs onto a line) */
+function lifeRoams(it) { const b = it.beh || {}, k = b.k; return k === 'phys' || k === 'path' || (b.move && b.edge !== 'stay') || (lifeTouch(b) && LIFE_GROUND.includes(k)); }
+/* the room round a picture its own movements and effects need, [left, top, right, bottom] (as its fixed region had) */
+function lifeMargin(it) {
+  const B = it.B, b = it.beh || {}, k = b.k === 'path' && b.sub ? b.sub : b.k, bw = B[2] - B[0], bh = B[3] - B[1], A = Math.max(1, +b.amp || 1), fx = Array.isArray(b.fx) && b.fx.length;
+  if (b.k === 'phys') { const R = Math.hypot(bw, bh) / 2, ex = (fx ? bw * 0.9 + 50 : 0); return [R - bw / 2 + 30 + ex, R - bh / 2 + 30 + (fx ? bh * 0.9 + 50 : 0), R - bw / 2 + 30 + ex, R - bh / 2 + 30]; }
+  let grow = 0; if (b.k === 'path' && b.path && Array.isArray(b.path.keys)) for (const q of b.path.keys) grow = Math.max(grow, (Math.max(0.2, +q.scale || +q.s || 1) - 1) * Math.max(bw, bh) / 2);
+  const up = (k === 'hop' ? bh * 1.3 * A : k === 'flap' ? bh * 1.1 * A : k === 'bob' ? bh * 0.35 * A : k === 'flicker' ? bh * 1.2 * A + 30 : k === 'swim' ? bh * 0.9 * A : bh * 0.35) + bh * 0.2 + 24 + (fx ? bh * 0.9 + 50 : 0) + grow;
+  const side = bw * (fx ? 0.9 : 0.45) + 24 + grow;
+  return [side, up, side, bh * 0.3 + 24 + grow];
+}
 function lifeDraw(it, rt) {
-  const cv = rt.cv; if (!cv) return; const w = it.w, h = it.h, dpr = Math.min(3, (window.devicePixelRatio || 1) * Math.max(1, (S.base || 1) * (S.zoom || 1))), cap = Math.min(dpr, Math.sqrt(6e6 / Math.max(1, w * h)));
+  const cv = rt.cv; if (!cv) return; let w = it.w, h = it.h, x0 = it.x, y0 = it.y;
+  /* out on the paper (pagewalk.js): a picture that goes about has a canvas that goes with it, so it is drawn whole wherever
+     it goes on the page (its region was a band, and a picture that climbed or flew past it was cut) */
+  if (pwOn() && it.B && lifeRoams(it) && cv.closest('#items')) { const win = pwWin(cv, cv.parentNode, it, lifeBox(it, rt), lifeMargin(it)); x0 = win[0]; y0 = win[1]; w = win[2]; h = win[3]; rt.win = win; }
+  else if (cv._pw) { cv._pw = null; cv.style.position = ''; cv.style.left = ''; cv.style.top = ''; cv.style.width = '100%'; cv.style.height = (it.h || 100) + 'px'; rt.win = null; }
+  const dpr = Math.min(3, (window.devicePixelRatio || 1) * Math.max(1, (S.base || 1) * (S.zoom || 1))), cap = Math.min(dpr, Math.sqrt(6e6 / Math.max(1, w * h)));
   if (cv.width !== Math.round(w * cap) || cv.height !== Math.round(h * cap)) { cv.width = Math.round(w * cap); cv.height = Math.round(h * cap); }
-  const c = cv.getContext('2d'); c.setTransform(cap, 0, 0, cap, 0, 0); c.clearRect(0, 0, w, h); c.translate(-it.x, -it.y);
+  const c = cv.getContext('2d'); c.setTransform(cap, 0, 0, cap, 0, 0); c.clearRect(0, 0, w, h); c.translate(-x0, -y0);
   if (rt.seed == null) rt.seed = Math.random() * 50;
   const B = it.B, b = it.beh, A = (b.amp || 1) * (1 + (b.k === 'flap' ? 0.5 * (rt.scare || 0) : 0)), T0 = rt.t, t = T0 + rt.seed + (b.k === 'flap' ? (rt.wingX = (rt.wingX || 0) + (rt.scare || 0) * 0.03) : 0), bw = B[2] - B[0], bh = B[3] - B[1], cx = (B[0] + B[2]) / 2, cy = (B[1] + B[3]) / 2, TAU = Math.PI * 2;
   const face = b.face || 1, moving = b.move && b.edge !== 'stay', isPath = b.k === 'path', k = isPath && b.sub ? b.sub : b.k, base = (LIFE_SPEED[k] || 60) * (b.sp || 1), vr = moving ? clamp((rt.v || 0) / Math.max(1, base), 0, 1.6) : 1;
@@ -2607,7 +2707,7 @@ function lifeDraw(it, rt) {
   /* a soft shadow on the ground under anything off the ground, smaller and fainter the higher it is */
   if (['flap', 'hop', 'phys', 'bob'].includes(k) || isPath) {
     const gy = lifeGroundBelow(cx + ox, B[3] + Math.max(0, oy)), lift = gy - (B[3] + oy);
-    if (lift > 2 && lift < 600) { const f = clamp(1 - lift / 400, 0.15, 1); c.save(); c.globalAlpha = 0.16 * f; c.fillStyle = '#1B2230'; c.beginPath(); c.ellipse(cx + ox, gy - 2, bw * 0.42 * (0.6 + 0.4 * f), Math.max(2, bh * 0.08 * f), 0, 0, 6.2832); c.fill(); c.restore(); }
+    if (lift > 2 && lift < 600 && (!rt.win || gy + Math.max(2, bh * 0.08) + 3 < y0 + h)) { const f = clamp(1 - lift / 400, 0.15, 1); c.save(); c.globalAlpha = 0.16 * f; c.fillStyle = '#1B2230'; c.beginPath(); c.ellipse(cx + ox, gy - 2, bw * 0.42 * (0.6 + 0.4 * f), Math.max(2, bh * 0.08 * f), 0, 0, 6.2832); c.fill(); c.restore(); }
   }
   /* a hard landing or a bounce squashes the body a little along the hit, then it springs back */
   if (rt.sq) { const d = rt.sqN || [0, 1], ang = Math.atan2(d[1], d[0]), q = rt.sq; c.translate(cx + ox, cy + oy); c.rotate(ang); c.scale(1 - 0.22 * q, 1 + 0.12 * q); c.rotate(-ang); c.translate(-cx - ox, -cy - oy); }
@@ -2667,7 +2767,7 @@ function lifeDraw(it, rt) {
   /* what the real thing would bring with it, drawn around the picture in the same light hand: sparks and smoke over a flame,
      bubbles from a fish, dust where feet land, exhaust and speed lines behind a car, pulse rings round a beating heart,
      wind through a tree, and a startled "!" with a drop of sweat when something rushes at it */
-  if (b.fx !== 0) { c.setTransform(cap, 0, 0, cap, 0, 0); c.translate(-it.x, -it.y); lifeFx(c, it, rt, { k, t, T0, A, B, bw, bh, cx, cy, ox, oy, face: flip ? -face : face, moving, vr }); }
+  if (b.fx !== 0) { c.setTransform(cap, 0, 0, cap, 0, 0); c.translate(-x0, -y0); lifeFx(c, it, rt, { k, t, T0, A, B, bw, bh, cx, cy, ox, oy, face: flip ? -face : face, moving, vr }); }
 }
 
 /* ----- faces: a drawn person can shout, talk, laugh, smile, be sad, cry, be surprised or angry; the drawn mouth (and for
@@ -2849,6 +2949,9 @@ function lifeFx(c, it, rt, o) {
     const f = p.age / p.life; p.x += p.vx * dt; p.y += p.vy * dt;
     if (p.ty === 'bubble') p.x += Math.sin((p.age + q) * 6) * 0.4;
     if (p.ty === 'dust') p.vy += 60 * dt;
+    /* out on the paper the canvas goes with the picture (pagewalk.js): a bubble or a puff it has left behind is not drawn
+       once it reaches the edge of the canvas, instead of being drawn cut */
+    if (rt.win) { const m = (p.r || 4) * 3 + 6, w0 = rt.win; if (p.x - m < w0[0] || p.x + m > w0[0] + w0[2] || p.y - m < w0[1] || p.y + m > w0[1] + w0[3]) continue; }
     c.save();
     if (p.ty === 'ember') { c.globalAlpha = (1 - f) * 0.9; c.fillStyle = f < 0.4 ? '#F4A23B' : '#D9602A'; c.beginPath(); c.arc(p.x + Math.sin(p.age * 9 + q) * 2, p.y, p.r * (1 - f * 0.5), 0, 6.2832); c.fill(); }
     else if (p.ty === 'smoke') { c.globalAlpha = 0.08 * Math.sin(Math.PI * f); c.fillStyle = '#6B7280'; c.beginPath(); c.arc(p.x + Math.sin(p.age * 2 + q) * 5, p.y, p.r * (1 + f * 2.8), 0, 6.2832); c.fill(); }
@@ -2916,6 +3019,8 @@ function lifeSegs(box) {
   for (const q of Wd.boxes) if (!(q[2] < box[0] || q[0] > box[2] || q[3] < box[1] || q[1] > box[3])) rect(q, 0, 0);
   /* other moving pictures that are not physical bodies push like a moving wall */
   for (const [id2, r2] of LIFE) { const o = findItem(id2); if (!o || !o.beh || !o.B || o.beh.k === 'phys') continue; if (!(o.beh.move || o.beh.k === 'path')) continue; const q = lifeBox(o, r2); if (q[2] < box[0] || q[0] > box[2] || q[3] < box[1] || q[1] > box[3]) continue; const ux = o.beh.k === 'path' ? 0 : (r2.dir || 1) * (r2.v || 0); rect(q, ux, 0, id2); }
+  /* an animal out on the paper (and a drawing moving by physics) is a wall that moves: a ball it walks into is kicked on */
+  for (const m of lifeMet()) { const q = m[0]; if (q[2] < box[0] || q[0] > box[2] || q[3] < box[1] || q[1] > box[3]) continue; rect(q, m[1], 0, null); }
   segs.push([0, H, W, H, 0, 0, 0], [0, 0, 0, H, 0, 0, 0], [W, 0, W, H, 0, 0, 0], [0, 0, W, 0, 0, 0, 0]);
   return segs;
 }
@@ -3010,4 +3115,102 @@ async function lifeAuto(sp) {
 }
 /* started from the app's play-all button: the moving drawings and models that were waiting start again */
 function animKick(on) { if (on && !lifeRaf && LIFE.size) lifeRaf = requestAnimationFrame(lifeTick); if (on && !scnRaf && SCN.size) scnRaf = requestAnimationFrame(scTick); }
+
+/* ----- every moving picture out on the paper (owner 23 พ.ย. 2569, switch "pagemove", the part after the animals): the
+   living pictures (life.js) and the drawings made to move by the rules of physics (scene.js, spec.bare) stand on any line
+   of ink and on the top of any box, are stopped by the side of a box or a steep line, meet the animals out on the paper and
+   each other, and are always drawn whole. Built on the same idea as the animals' page (animals.js anEnv anSupport anHits):
+   the page as segments, built again when a line or a box is added or taken away, and looked at again twice a second.
+   The parts live in separate scopes, so this is the same work done here for the pictures; the animals keep their own ----- */
+function pwOn() { return typeof flagOn !== 'function' || flagOn('pagemove'); }
+/* what walks by itself on the page: it is not ground or a wall for the others (they meet it as a moving thing) */
+function pwWalker(it) { return !!(it && (it.type === 'life' || (it.spec && (it.spec.bare || it.spec.clean)))); }
+let PW_ENV = null, PW_T = 0;
+function pwEnvSig() {
+  let n = 0, a = 0; for (const r of allStrokes()) { const p = r.s.p || []; n++; a = (a * 31 + p.length + (p[0] | 0) + (p[1] | 0)) % 2147483647; }
+  let b = 0; for (const it of visibleItems()) { if (pwWalker(it)) continue; b = (b * 17 + Math.round((it.x || 0) + (it.y || 0) * 3 + (it.w || 0) * 7 + (it.h || 0) * 11)) % 2147483647; }
+  return n + ':' + a + ':' + b + ':' + S.pid;
+}
+/* the page as segments: lines of ink (a line written on a moving picture rides on it and is left out), and the top and
+   sides of every box (a text box only where its words are) */
+/* a cheap key that changes at once when a line or a box is added or taken away (or another page is open) */
+function pwKey() {
+  const its = (S.page && S.page.items) || [], lm = S.mine[S.mine.length - 1], li = its[its.length - 1]; let o = 0;
+  for (const k in S.others) o += S.others[k].length;
+  return S.pid + ':' + S.mine.length + ':' + (lm ? lm.id : '') + ':' + its.length + ':' + (li ? li.id : '') + ':' + o;
+}
+function pwEnv() {
+  const n = pwKey(), now = performance.now();
+  if (PW_ENV && PW_ENV.n === n && PW_ENV.pid === S.pid && now - PW_T < 400) return PW_ENV;
+  PW_T = now; const sig = pwEnvSig(); if (PW_ENV && PW_ENV.sig === sig) { PW_ENV.n = n; return PW_ENV; }
+  const walk = new Set(); for (const it of visibleItems()) if (pwWalker(it)) walk.add(it.id);
+  const L = [];
+  for (const r of allStrokes()) {
+    const st = r.s, p = st.p || []; if (st.on && walk.has(st.on)) continue; if (p.length < 3) continue;
+    const seg = []; let x0 = p[0] / 10, x1 = x0, y0 = p[1] / 10, y1 = y0, px = x0, py = y0;
+    const step = p.length > 900 ? 9 : p.length > 180 ? 6 : 3;
+    for (let i = step; i < p.length; i += step) { const j = Math.min(i, p.length - 3), x = p[j] / 10, y = p[j + 1] / 10; if (Math.hypot(x - px, y - py) > 0.5) { seg.push([px, py, x, y]); px = x; py = y; } if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; if (j >= p.length - 3) break; }
+    if (!seg.length) seg.push([px - 0.5, py, px + 0.5, py]); /* a dot is still something */
+    L.push({ b: [x0, y0, x1, y1], seg, w: (st.w || 3) / 2, s: st });
+  }
+  const R = [];
+  for (const it of visibleItems()) {
+    if (pwWalker(it) || isBgItem(it)) continue;
+    const el = itemsEl.querySelector('[data-id="' + it.id + '"]'); if (!el || el.hidden || !el.offsetHeight) continue;
+    const b = !it.type || it.type === 'text' ? tightItemBox(it) : itemBox(it); if (b[2] - b[0] < 4 || b[3] - b[1] < 4) continue;
+    R.push({ id: it.id, b, seg: [[b[0], b[1], b[2], b[1]], [b[0], b[1], b[0], b[3]], [b[2], b[1], b[2], b[3]], [b[0], b[3], b[2], b[3]]] });
+  }
+  PW_ENV = { sig, n, pid: S.pid, L, R }; return PW_ENV;
+}
+/* the segments that come near a rectangle [x0, y0, x1, y1] */
+function pwNear(r, skip) {
+  const E = pwEnv(), out = [];
+  for (const l of E.L) { const b = l.b; if (b[2] < r[0] || b[0] > r[2] || b[3] < r[1] || b[1] > r[3]) continue; for (const q of l.seg) if (Math.max(q[0], q[2]) >= r[0] && Math.min(q[0], q[2]) <= r[2] && Math.max(q[1], q[3]) >= r[1] && Math.min(q[1], q[3]) <= r[3]) out.push(q); }
+  for (const o of E.R) { const b = o.b; if (skip && skip.has(o.id)) continue; if (b[2] < r[0] || b[0] > r[2] || b[3] < r[1] || b[1] > r[3]) continue; for (const q of o.seg) out.push(q); }
+  return out;
+}
+/* the animals out on the paper now: their bodies (not their empty boxes) and how fast they go, in points a second */
+function pwAnimals() {
+  const out = []; if (typeof anVis !== 'function') return out;
+  for (const it of visibleItems()) { if (it.type !== 'scene' || !it.spec || !it.spec.animal) continue; const q = anVis(it.id); if (q) out.push({ id: it.id, box: [q[0], q[1], q[2], q[3]], vx: clamp(q[4] || 0, -600, 600) }); }
+  return out;
+}
+/* a moving picture's window on the page: the part of the page its canvas covers now, round where the picture is, with
+   the room its own movements and effects need (so nothing of it is ever cut). Its size stays the same, only its place
+   follows the picture (a small canvas that moves, not one as wide as the page) */
+function pwWin(cv, el, it, box, m) {
+  const x = Math.round(box[0] - m[0]), y = Math.round(box[1] - m[1]), w = Math.round(box[2] - box[0] + m[0] + m[2]), h = Math.round(box[3] - box[1] + m[1] + m[3]);
+  const k = [x - (it.x || 0), y - (it.y || 0), w, h].join();
+  if (cv._pw !== k) { cv._pw = k; cv.style.position = 'absolute'; cv.style.left = (x - (it.x || 0)) + 'px'; cv.style.top = (y - (it.y || 0)) + 'px'; cv.style.width = w + 'px'; cv.style.height = h + 'px'; if (el) el.classList.add('pwmove'); }
+  return [x, y, w, h];
+}
+/* the page's segments as surfaces of a drawing that moves by physics (spec.bare): only those near its bodies, so a page
+   full of writing stays light; animals are walls that move */
+function pwSurfaces(it, r, sp) {
+  /* the page and its world as it was last drawn (phDraw's map); a drawn person that turned back is drawn mirrored about
+     where it turned (ipTurn), and the page is seen the same way */
+  const mp = r.map || { sc: W / Math.max(1e-6, sp.world.w || 1), ox: 0, oy: 0, x0: 0, y0: 0, h: it.h || 0 }, K = mp.sc, m = r.mir || { s: 1, O: 0 }, out = [];
+  const bx = it.x || 0, by = (it.y || 0) + mp.h - mp.oy;
+  const px = (x) => bx + m.s * (mp.ox + (x - mp.x0) * K) + m.O, py = (y) => by - (y - mp.y0) * K;
+  const toW = (x, y) => [((x - bx - m.O) / m.s - mp.ox) / K + mp.x0, (by - y) / K + mp.y0];
+  /* the boxes it was drawn over (or that were put over it) are not in its way, as with an animal */
+  if (!r.pwSkip) { r.pwSkip = new Set(); for (const b of r.st.bodies) { if (b.fixed) continue; const cx = px(b.x), cy = py(b.y); for (const o of pwEnv().R) if (cx > o.b[0] && cx < o.b[2] && cy > o.b[1] && cy < o.b[3]) r.pwSkip.add(o.id); } }
+  for (const b of r.st.bodies) {
+    if (b.fixed) continue;
+    let rect;
+    if (b.shape === 'person') { const hx = px(b.x), H0 = (b.hgt || 1.7) * K; rect = [hx - 0.6 * H0, py(b.y + 0.8 * b.hgt), hx + 0.6 * H0, py(b.y) + 1.6 * H0]; }
+    else { const rr = ((b.hsz || Math.max(b.w || 0, b.h || 0, 2 * (b.r || 0)))) * K + Math.hypot(b.vx || 0, b.vy || 0) * K * 0.05 + 30, cx = px(b.x), cy = py(b.y); rect = [cx - rr, cy - rr, cx + rr, cy + rr]; }
+    for (const q of pwNear(rect, r.pwSkip)) { const a = toW(q[0], q[1]), z = toW(q[2], q[3]); out.push({ x1: a[0], y1: a[1], x2: z[0], y2: z[1], mu: 0.4, mus: 0.5, _pg: 1 }); }
+    for (const A of pwAnimals()) { const q = A.box; if (q[2] < rect[0] || q[0] > rect[2] || q[3] < rect[1] || q[1] > rect[3]) continue; const c = [[q[0], q[3], q[0], q[1]], [q[0], q[1], q[2], q[1]], [q[2], q[1], q[2], q[3]]]; for (const s of c) { const a = toW(s[0], s[1]), z = toW(s[2], s[3]); out.push({ x1: a[0], y1: a[1], x2: z[0], y2: z[1], mu: 0.3, mus: 0.4, _pg: 1, _an: 1 }); } }
+  }
+  return out;
+}
+/* the model as it is plus the page round its bodies: the same spec seen with more surfaces (nothing is saved) */
+function pwSpec(it, r, sp) {
+  const extra = pwSurfaces(it, r, sp), p = r.st.bodies.find((b) => b.shape === 'person'); if (!extra.length && !p) return sp;
+  const v = Object.create(sp); v.surfaces = extra.length ? sp.surfaces.concat(extra) : sp.surfaces;
+  /* a person stands on what is under its feet: a line or a box up to a small step higher, not one over its head */
+  if (p && p.kin) { v._gl = Math.min(p.kin.fl[1], p.kin.fr[1]); v._gs = 0.15 * (p.hgt || 1.7); }
+  return v;
+}
 
