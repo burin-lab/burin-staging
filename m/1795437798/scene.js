@@ -328,12 +328,12 @@ function phDraw(c, w, h, sp, st, rt) {
   const ox = pad + ((w - 2 * pad) - (x1 - x0) * sc) / 2, oy = pad + ((h - 2 * pad) - (y1 - y0) * sc) / 2;
   const X = (x) => ox + (x - x0) * sc, Y = (y) => h - oy - (y - y0) * sc; rt.map = { X, Y, sc, x0, y0, ox, oy, h };
   /* fields */
-  const fl = sp.fields;
+  const fl = rt.outPass ? {} : sp.fields; /* the outside pass (scOutDraw): only what moves */
   if (fl.E && (fl.E[0] || fl.E[1])) { c.strokeStyle = 'rgba(224,161,0,0.35)'; c.lineWidth = 1.2; const L = Math.hypot(fl.E[0], fl.E[1]), ux = fl.E[0] / L, uy = fl.E[1] / L; for (let i = 1; i < 6; i++) for (let j = 1; j < 4; j++) { const px = ox + (w - 2 * ox) * i / 6, py = oy + (h - 2 * oy) * j / 4; scArrow(c, px - ux * 14, py + uy * 14, px + ux * 14, py - uy * 14, 'rgba(224,161,0,0.45)', 1.2, 6); } c.fillStyle = '#B07D00'; c.font = '13px Sarabun, sans-serif'; c.fillText('สนามไฟฟ้า E', 10, 18); }
   if (fl.B) { c.fillStyle = 'rgba(14,154,167,0.45)'; c.font = '14px sans-serif'; for (let i = 1; i < 8; i++) for (let j = 1; j < 5; j++) { const px = ox + (w - 2 * ox) * i / 8, py = oy + (h - 2 * oy) * j / 5; c.fillText(fl.B > 0 ? '•' : '×', px - 3, py + 4); } c.fillStyle = '#0B7480'; c.font = '13px Sarabun, sans-serif'; c.fillText('สนามแม่เหล็ก B ' + (fl.B > 0 ? 'พุ่งออกจากจอ' : 'พุ่งเข้าจอ'), 10, fl.E ? 36 : 18); }
   if (fl.central) { const cx = X(fl.central.x), cy = Y(fl.central.y), r = Math.max(6, fl.central.r * sc); const gr = c.createRadialGradient(cx - r * 0.3, cy - r * 0.3, r * 0.1, cx, cy, r); gr.addColorStop(0, '#FFE08A'); gr.addColorStop(1, '#E39B2D'); c.fillStyle = gr; c.beginPath(); c.arc(cx, cy, r, 0, 6.283); c.fill(); if (fl.central.label) { c.fillStyle = '#7A4A0C'; c.font = '13px Sarabun, sans-serif'; c.fillText(fl.central.label, cx + r + 4, cy - r); } }
   /* surfaces with hatching */
-  for (const s of sp.bare ? [] : sp.surfaces) {
+  for (const s of sp.bare || rt.outPass ? [] : sp.surfaces) {
     c.strokeStyle = '#3B4350'; c.lineWidth = 3; c.beginPath(); c.moveTo(X(s.x1), Y(s.y1)); c.lineTo(X(s.x2), Y(s.y2)); c.stroke();
     const L = Math.hypot(X(s.x2) - X(s.x1), Y(s.y2) - Y(s.y1)), n = Math.floor(L / 12), dx = (X(s.x2) - X(s.x1)) / L, dy = (Y(s.y2) - Y(s.y1)) / L;
     c.strokeStyle = 'rgba(59,67,80,0.35)'; c.lineWidth = 1; c.beginPath(); for (let i = 0; i <= n; i++) { const px = X(s.x1) + dx * i * 12, py = Y(s.y1) + dy * i * 12; c.moveTo(px, py); c.lineTo(px - 7 * dy - 5 * dx, py + 7 * dx - 5 * dy); } c.stroke();
@@ -384,8 +384,8 @@ function phDraw(c, w, h, sp, st, rt) {
     if (sp.show.a && b.ax != null) { const as = rt.ascale; if (Math.hypot(b.ax, b.ay) * as > 3) { scArrow(c, bx, by, bx + b.ax * as, by - b.ay * as, SC_COL.a, 2, 8); scLabel(c, 'a', bx + b.ax * as + 4, by - b.ay * as - 4, SC_COL.a); } }
   }
   /* legend */
-  if (sp.show.fbd && used.size && !sp.bare) { let lx = w - 8, ly = 16; c.font = '12px Sarabun, sans-serif'; for (const k of [...used]) { const t = SC_FNAME[k] || k, tw = c.measureText(t).width; c.fillStyle = SC_COL[k] || '#333'; c.fillRect(lx - tw - 18, ly - 8, 10, 3); c.fillStyle = '#3B4350'; c.fillText(t, lx - tw, ly - 3); ly += 16; } }
-  if (sp.show.energy) phEnergy(c, w, h, sp, st);
+  if (sp.show.fbd && used.size && !sp.bare && !rt.outPass) { let lx = w - 8, ly = 16; c.font = '12px Sarabun, sans-serif'; for (const k of [...used]) { const t = SC_FNAME[k] || k, tw = c.measureText(t).width; c.fillStyle = SC_COL[k] || '#333'; c.fillRect(lx - tw - 18, ly - 8, 10, 3); c.fillStyle = '#3B4350'; c.fillText(t, lx - tw, ly - 3); ly += 16; } }
+  if (sp.show.energy && !rt.outPass) phEnergy(c, w, h, sp, st);
 }
 function phEnergy(c, w, h, sp, st) {
   let K = 0, U = 0, Us = 0; const g = sp.world.g;
@@ -569,15 +569,16 @@ function scReset(it, r) {
 }
 /* a drawing that moves by physics, out on the paper (pagewalk.js, switch "pagemove"): the lines and boxes of the page round
    it are surfaces too, also those drawn after it started; else the model as it was made */
-function scPageSpec(it, r, sp) { if (!sp.bare || !pwOn()) return sp; try { return pwSpec(it, r, sp); } catch (e) { return sp; } }
+function scPageSpec(it, r, sp) { if (!(sp.bare || r.pageOut) || !pwOn()) return sp; try { return pwSpec(it, r, sp); } catch (e) { return sp; } }
 /* one frame of a physics model (also driven step by step by the tests): true when it has drawn itself this frame */
 function scPhysTick(it, r, sp, dtw) {
   if (r.turning != null) { r.turning += dtw / 0.4; if (r.turning >= 0.5 && !r.turned) { ipTurn(it, r); r.turned = true; } if (r.turning >= 1) { r.turning = null; r.turned = false; } scRender(it, r); return true; } if (r.peek) { r.peek -= dtw; if (r.peek <= 0) { r.peek = 0; r.turning = 0; r.turned = false; } scRender(it, r); return true; } const sim = dtw * (sp.speed || 1) * (r.slow ? 0.25 : 1), n = Math.max(1, Math.ceil(sim / 0.004)), spv = scPageSpec(it, r, sp); for (let i = 0; i < n; i++) phStep(spv, r.st, sim / n); for (const b of r.st.bodies) { b.trail.push([b.x, b.y]); if (b.trail.length > 400) b.trail.shift(); }
       const pick = sp.show.graph; if (pick !== 'none') { r.st.hist.push([r.st.t].concat(r.st.bodies.filter((b) => !b.fixed).map((b) => pick === 'x' ? b.x : pick === 'y' ? b.y : pick === 'vx' ? b.vx : pick === 'vy' ? b.vy : pick === 'grf' ? (b.F.N ? b.F.N[1] : 0) : Math.hypot(b.vx, b.vy)))); if (r.st.hist.length > 600) r.st.hist.shift(); }
+      const up = sp.bare && sp.world.g > 0 && pwOn(); /* out on the paper a body thrown up high comes down again (pagewalk.js) */
       const [x0, y0, x1, y1] = phBounds(sp, r.st), far = sp.bare ? 0.3 : Math.max(x1 - x0, y1 - y0) * 3; const edge = sp.bare && it.rig && it.rig.edge;
       if (sp.bare && it.rig && it.rig.kind === 'person') ipSense(it, r);
       if (edge && edge !== 'stay') ipEdge(it, r, x0, x1);
-      else if (sp.bare && r.st.bodies.some((b) => b.shape === 'person' && (b.x < x0 - 0.5 || b.x > x1 + 0.5))) { r.playing = false; r.ended = true; } if (!r.st.bodies.some((b) => b.shape === 'person') && r.st.bodies.every((b) => b.fixed || b.x < x0 - far || b.x > x1 + far || b.y < y0 - far || b.y > y1 + far)) { r.playing = false; r.ended = true; }
+      else if (sp.bare && r.st.bodies.some((b) => b.shape === 'person' && (b.x < x0 - 0.5 || b.x > x1 + 0.5))) { r.playing = false; r.ended = true; } if (!r.st.bodies.some((b) => b.shape === 'person') && r.st.bodies.every((b) => b.fixed || b.x < x0 - far || b.x > x1 + far || b.y < y0 - far || (b.y > y1 + far && !up))) { r.playing = false; r.ended = true; }
   return false;
 }
 function scTick(ts) {
@@ -595,6 +596,25 @@ function scTick(ts) {
   }
   if (any) scnRaf = requestAnimationFrame(scTick); else scnLast = 0;
 }
+/* a model of bodies (2D physics, pagewalk.js switch "pagemove"): drawn on a canvas over its box that reaches as far as its
+   bodies go, so a ball thrown out of the box is seen whole on the page. Inside its box everything is drawn as before; outside
+   it only what moves (bodies, their arrows, trails, ropes and springs), so the ground and fields of the model stay in its box.
+   Without a frame (it.fr 0, the usual for a new one) the lines and boxes of the page are surfaces for its bodies too */
+function scOutDraw(it, r, w, h, ah) {
+  const cv = r.cv, d = cv.parentNode, ov = r.ov, sp = it.spec; if (!d) { phDraw(cv.getContext('2d'), w, ah, sp, r.st, r); return; }
+  const bx = (it.x || 0) + d.clientLeft + cv.offsetLeft, by = (it.y || 0) + d.clientTop + cv.offsetTop; r.org = [bx, by];
+  /* the window: the box and every body where it was last drawn, with room for its arrows, on the page */
+  let x0 = bx, y0 = by, x1 = bx + w, y1 = by + h; const mp = r.map;
+  if (mp) for (const b of r.st.bodies) { if (b.fixed) continue; const X = bx + mp.X(b.x), Y = by + mp.Y(b.y), m = 160; x0 = Math.min(x0, X - m); x1 = Math.max(x1, X + m); y0 = Math.min(y0, Y - m); y1 = Math.max(y1, Y + m); for (const p of sp.show.trail ? b.trail : []) { const tx = bx + mp.X(p[0]), ty = by + mp.Y(p[1]); x0 = Math.min(x0, tx - 4); x1 = Math.max(x1, tx + 4); y0 = Math.min(y0, ty - 4); y1 = Math.max(y1, ty + 4); } }
+  const q = 64; x0 = Math.max(Math.min(bx, 0), Math.floor(x0 / q) * q); y0 = Math.max(Math.min(by, 0), Math.floor(y0 / q) * q); x1 = Math.min(Math.max(bx + w, W), Math.ceil(x1 / q) * q); y1 = Math.min(Math.max(by + h, H), Math.ceil(y1 / q) * q);
+  const ww = x1 - x0, hh = y1 - y0, k = [x0, y0, ww, hh].join();
+  if (ov._k !== k) { ov._k = k; ov.style.left = (x0 - (it.x || 0) - d.clientLeft) + 'px'; ov.style.top = (y0 - (it.y || 0) - d.clientTop) + 'px'; ov.style.width = ww + 'px'; ov.style.height = hh + 'px'; }
+  const dpr = Math.min(3, (window.devicePixelRatio || 1) * Math.max(1, (S.base || 1) * (S.zoom || 1)), Math.sqrt(6e6 / Math.max(1, ww * hh)));
+  if (ov.width !== Math.round(ww * dpr) || ov.height !== Math.round(hh * dpr)) { ov.width = Math.round(ww * dpr); ov.height = Math.round(hh * dpr); }
+  const c = ov.getContext('2d'); c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, ov.width, ov.height); c.setTransform(dpr, 0, 0, dpr, (bx - x0) * dpr, (by - y0) * dpr);
+  c.save(); c.beginPath(); c.rect(0, 0, w, ah); c.clip(); phDraw(c, w, ah, sp, r.st, r); c.restore();
+  c.save(); c.beginPath(); c.rect(x0 - bx, y0 - by, ww, hh); c.rect(0, 0, w, h); c.clip('evenodd'); r.outPass = 1; try { phDraw(c, w, ah, sp, r.st, r); } finally { r.outPass = 0; } c.restore();
+}
 function scRender(it, r) {
   const cv = r.cv; if (!cv) return; const sp = it.spec;
   if (sp.animal && r.box && r.box.isConnected) return anRender(it, r);
@@ -608,13 +628,14 @@ function scRender(it, r) {
   else if (sp.bare && cv._pwb) { cv._pwb = null; cv.style.marginTop = ''; cv.style.removeProperty('height'); }
   if (sp.bare) { const cap = Math.min(dpr, Math.sqrt(9e6 / Math.max(1, w * h))); if (cv.width !== Math.round(w * cap) || cv.height !== Math.round(h * cap)) { cv.width = Math.round(w * cap); cv.height = Math.round(h * cap); } c.setTransform(cap, 0, 0, cap, 0, 0); c.clearRect(0, 0, w, h); if (pwTop) { c.translate(0, pwTop); h -= pwTop; } }
   else if (sp.clean) { c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, cv.width, cv.height); c.setTransform(dpr, 0, 0, dpr, 0, 0); }
+  else if (r.pageOut) { c.setTransform(dpr, 0, 0, dpr, 0, 0); c.clearRect(0, 0, w, h); } /* frameless out on the paper: the page shows through */
   else { c.setTransform(dpr, 0, 0, dpr, 0, 0); c.fillStyle = '#FFFFFF'; c.fillRect(0, 0, w, h); }
   if (sp.dim === 3) { if (sc3Render(c, w, h, sp, r) === false) loadLib('math').then(() => scRender(it, r)).catch(() => {}); if (r.ro) r.ro.innerHTML = (r.read || []).map(([k, v]) => '<span><b>' + esc(String(k)) + '</b> ' + esc(String(v)) + '</span>').join(''); return; }
   if (sp.domain === 'phys') {
     const gh = sp.show.graph !== 'none' && r.showGraph && !sp.bare ? Math.round(h * 0.28) : 0, ah = h - gh;
     const span = Math.min(sp.world.w, sp.world.h), pxPerM = Math.min((w - 32) / sp.world.w, (ah - 32) / sp.world.h);
     r.fscale = (span * 0.22 * pxPerM) / (r.fmax || 1); r.vscale = (span * 0.25 * pxPerM) / (r.vmax || 1); r.ascale = (span * 0.22 * pxPerM) / Math.max(sp.world.g || 1, 1e-9);
-    phDraw(c, w, ah, sp, r.st, r);
+    if (!sp.bare && r.ov && r.ov.isConnected && pwOn()) scOutDraw(it, r, w, h, ah); else phDraw(c, w, ah, sp, r.st, r);
     const live = r.st.bodies.filter((b) => !b.fixed);
     r.read = [['t', fmtNum(+r.st.t.toFixed(2)) + ' s']].concat(live.slice(0, 3).map((b) => [b.label, 'v = ' + fmtNum(+Math.hypot(b.vx, b.vy).toFixed(2)) + ' m/s' + (b.ax != null ? ', a = ' + fmtNum(+Math.hypot(b.ax, b.ay).toFixed(2)) + ' m/s²' : '')]));
     for (const b of live.filter((x) => x.shape === 'person').slice(0, 2)) { const N = b.F.N ? b.F.N[1] : 0; r.read.push([b.label || 'คน', (b.kin ? b.kin.phase + ', ' : '') + 'แรงจากพื้น ' + fmtNum(Math.round(N)) + ' N = ' + fmtNum(+(N / (b.m * (sp.world.g || 9.8))).toFixed(2)) + ' เท่าของน้ำหนัก']); }
@@ -665,6 +686,10 @@ function buildScene(d, it, forExport) {
      it with room all round, so a part that goes past the box is still drawn (anMargin) */
   if (sp.animal && !forExport) { const bx = document.createElement('div'); bx.className = 'anbox'; d.appendChild(bx); cv.classList.add('anover'); r.box = bx; } else r.box = null;
   d.appendChild(cv); r.cv = cv;
+  /* a model of bodies (2D physics) is drawn whole on the page, past its box (scOutDraw); without a frame it is out on the
+     paper: the page's lines and boxes are surfaces for its bodies (pagewalk.js, switch "pagemove") */
+  r.ov = null; r.pageOut = false; r.org = null;
+  if (!forExport && sp.domain === 'phys' && sp.dim !== 3 && !sp.bare && pwOn()) { const ov = document.createElement('canvas'); ov.className = 'scnover'; ov.setAttribute('aria-hidden', 'true'); d.appendChild(ov); r.ov = ov; r.pageOut = d.classList.contains('froff'); r.pwSkip = null; if (r.pageOut) d.classList.add('pageout'); }
   if (!forExport && sp.domain !== 'math') {
     const tg = document.createElement('div'); tg.className = 'scntog';
     const tog = (label, get, set) => { const b = document.createElement('button'); b.type = 'button'; b.className = 'chip'; b.textContent = label; b.setAttribute('aria-pressed', get() ? 'true' : 'false'); b.onclick = () => { const live = findItem(it.id) || it; set(live.spec, !get(live.spec)); b.setAttribute('aria-pressed', get(live.spec) ? 'true' : 'false'); scRender(live, r); savePage(); }; tg.appendChild(b); };
@@ -791,9 +816,12 @@ function buildScene(d, it, forExport) {
     d.appendChild(hb); d.appendChild(pill);
   }
 }
+/* a model of bodies starts without a frame, out on the paper (owner 22 พ.ย. 2569: no frame by default, only what moves;
+   the frame is the user's choice) */
+function scNoFrame(sp) { return pwOn() && (typeof frameOn !== 'function' || frameOn()) && sp && sp.domain === 'phys' && sp.dim !== 3 && !sp.bare; }
 function insertScene(spec, at) {
   if (!S.page) return; const w = 520; const [x, y] = at || viewSpot(w, 520);
-  addItem({ type: 'scene', spec: scClean(spec), x, y, w });
+  const sp = scClean(spec); addItem(Object.assign({ type: 'scene', spec: sp, x, y, w }, scNoFrame(sp) ? { fr: 0 } : {}));
   toast('วางแบบจำลองแล้ว กดเล่น เปิดปิดแผนภาพแรงและกราฟได้ เลื่อนแถบเพื่อเปลี่ยนค่า', 3000);
 }
 
@@ -1200,7 +1228,9 @@ function motionWords(t) {
    A stick figure is recognised by its shape, so with two drawings the other one is the bird, the car, the ball ... */
 const MV_NOUNS = [['person', /คน|ผู้ชาย|ผู้หญิง|เด็ก|นักเรียน|ครู|ชาย|หญิง/], ['flyer', /นก|ผีเสื้อ|ค้างคาว|เครื่องบิน|แมลง|ผึ้ง/], ['fish', /ปลา/], ['car', /รถ/], ['animal', /หมา|แมว|ม้า|ช้าง|วัว|กระต่าย|กบ|สุนัข/], ['ball', /ลูกบอล|บอล|ก้อน|วงกลม|ลูก/]];
 function motionTargeted(text, pieces) {
-  if (pieces.length < 2) return null;
+  /* out on the paper (pagewalk.js) it can also go to an animal on the page, named in the words ("นกบินโฉบไปที่วัว") */
+  const pageAn = typeof pwOn === 'function' && pwOn() ? pwThings([]).filter((o) => o.title) : [];
+  if (pieces.length < 2 && !pageAn.some((o) => text.indexOf(o.title) > 0)) return null;
   const found = []; for (const [kind, re] of MV_NOUNS) { const m = re.exec(text); if (m) found.push([kind, m.index]); }
   if (!found.length) return null; found.sort((a, b) => a[1] - b[1]);
   const isPerson = (p) => { try { const st = p.refs.map(findStroke).filter(Boolean); if (st.length < 4) return false; const rg = ipRig(st); return !!(rg.headC && rg.legs.filter(Boolean).length === 2); } catch (e) { return false; } };
@@ -1210,6 +1240,7 @@ function motionTargeted(text, pieces) {
   const tm = /(?:ที่|หา|ใส่|ไปยัง|เข้าหา|ถึง|ไล่|ตาม)\s*(?:ตัว)?\s*([^\s]+)/.exec(text.slice(found[0][1] + 1));
   let target = null; if (tm) { const nk = MV_NOUNS.find(([, re]) => re.test(tm[1])); if (nk) target = pick(nk[0], subj); }
   if (!target && found[1]) target = pick(found[1][0], subj);
+  if (!target) { const after = text.slice(found[0][1] + 1); let best = null; for (const o of pageAn) { const i = after.indexOf(o.title); if (i >= 0 && (!best || i < best[0] || (i === best[0] && o.title.length > best[1].title.length))) best = [i, o]; } if (best) target = { n: null, box: best[1].box }; }
   const w = motionWords(text), flyer = found[0][0] === 'flyer' || w.k === 'flap', sub = flyer ? 'flap' : found[0][0] === 'fish' ? 'swim' : found[0][0] === 'animal' ? 'walk4' : found[0][0] === 'person' ? undefined : w.k;
   const plan = pieces.map((p) => ({ n: p.n, group: p.n, k: 'none' }));
   const me = plan.find((q) => q.n === subj.n);
@@ -1247,6 +1278,7 @@ async function motionPlan(text, sp, pieces) {
         + '- "preset": one of these behaviours when it fits well: ' + kinds + '.\n'
         + '- "path": any other movement described (circle around, climb up then come down, jump onto something, wave, spin three times, grow, shrink, go to a place). Give path.keys as a list of key frames {t seconds from start, dx, dy offset in page units from where it is drawn, rot degrees, scale}, first key t 0 with dx 0 dy 0, and loop true or false; path.anim is the behaviour the body keeps doing while it follows the path (flap for a bird beating its wings, walk4, swim, wiggle, or none). To go to another piece (swoop at it, run to it, chase it), aim the keys at that piece using the boxes above. Use enough keys (6 to 20) for a smooth natural motion and keep it on the page.\n'
         + 'Only the pieces the teacher asks to move should move; every other piece gets mode "none" (it may still react when something hits it).\n'
+        + (typeof pwOn === 'function' && pwOn() ? 'Out on the page every moving thing (presets with touch true, and physics) by itself walks on the drawn lines and on the top of boxes, turns back at the side of a box or a steep line, and meets the animals and other moving things as the real thing would (a bird flies off, a car stops and waits, a ball is pushed along). So prefer a preset or physics with touch true when it should just live and move about on the page; use path only for a route the teacher asks for. A path is followed as given, but waits while an animal or a box is in its way, and walks on the lines under it when it goes along the ground. Other things on the page now (page units): ' + (pwThings(sp.items).map((o) => o.what + ': x ' + o.box[0] + ' to ' + o.box[2] + ', y ' + o.box[1] + ' to ' + o.box[3]).join('; ') || 'none') + '. To go to one of them (an animal named in the request, for example), aim the path keys at its box.\n' : '')
         + 'A drawn person, face, animal or any thing given a voice (a talking sun, a singing flower) can also show a feeling or make a sound: give "expr" one of shout, talk, laugh, happy, sad, cry, surprise, angry when the teacher asks for it or it clearly fits (shouting, calling out, cheering = shout; speaking, greeting, explaining, singing = talk), even when no mouth or eyes were drawn. The app then draws or redraws the mouth, eyes and eyebrows to match (on the face when there is one, at the front when there is not) and adds sound lines, tears or the like, so the face really changes; pick a body motion that suits it (breathe or wiggle when standing, a path when it goes somewhere). Put all pieces of one person in one group.\n'
         + 'Make every thing, whatever it is, believable with "fx": a list (at most 5) of what the real thing would show while doing what was asked, each {"type", "at", "text"}. type is one of ' + LIFE_FX.join(', ') + ' (sound = sound lines, say = the sound word written by it, mouth = its mouth opening and closing as it makes the sound, notes = music notes, zzz = sleeping, steam = hot steam, drops = dripping water, glow = light, shine = a glint, speed = speed lines, shake = trembling marks). at is front, back, top, bottom, center, mouth, or [u, v] in the piece box (0 to 1 from the drawn left and top, the way it was drawn). text is the Thai sound word for say, at most 8 letters (a dog barking: โฮ่ง!, a car horn: ปี๊น!, a cat: เหมียว, a rooster: เอ้กอี๊!, a bell: กริ๊ง). For example: a dog barking gets mouth at its head, sound and say; a kettle boiling gets steam at the spout; a sleeping cat gets zzz; a singing bird gets notes and mouth; a car racing gets speed and dust; a lamp turned on gets glow. Add nothing that the teacher would not expect.\n'
         + 'Also give "plan": one short Thai sentence saying what will happen, written for the teacher (mention anything you added to make it natural).\n'
@@ -1369,6 +1401,7 @@ async function placeMotion(sp, make, person) {
   const keepImgs = sp.items.map(findItem).filter(Boolean).map(clone);
   const before = clone(S.page.items || []);
   const item = { id: 'i' + uid(), by: DEV, type: 'scene', spec: scClean(spec), x, y, w, ink: sp.ink.slice(0, 400), pics: keepImgs.slice(0, 6) };
+  if (scNoFrame(item.spec)) item.fr = 0;
   const extra = person ? [] : await mvApply(item, {}); delete item.under; if (item.orig) { item.ink = item.orig; delete item.orig; }
   setItems(before.filter((t) => !sp.items.includes(t.id)).concat([item], extra), before);
   clearSel();
@@ -1521,7 +1554,10 @@ function ipSense(it, r) {
 function ipActors() {
   const out = [];
   for (const [id, r] of SCN) {
-    const it = findItem(id); if (!it || !it.spec || !it.spec.bare || !r.st || !r.st.bodies || !r.cv || !r.cv.isConnected) continue;
+    const it = findItem(id); if (!it || !it.spec || !r.st || !r.st.bodies || !r.cv || !r.cv.isConnected) continue;
+    /* the bodies of a model out on the paper (frameless, pagewalk.js): each one where it is drawn now */
+    if (!it.spec.bare && r.pageOut && r.org && r.map) { for (const b of r.st.bodies) { if (b.fixed || b.shape === 'person') continue; const sc = r.map.sc, R = b.shape === 'ball' ? b.r * sc : Math.max(b.w, b.h) * sc / 2, X = r.org[0] + r.map.X(b.x), Y = r.org[1] + r.map.Y(b.y); out.push({ id, kind: b.shape === 'ball' ? 'ball' : 'thing', box: [X - R, Y - R, X + R, Y + R], vx: (b.vx || 0) * sc }); } continue; }
+    if (!it.spec.bare) continue;
     const b = r.st.bodies.find((q) => q.shape === 'person' || !q.fixed); if (!b) continue;
     const K = W / Math.max(1e-6, it.spec.world.w || 1), m = r.mir || { s: 1, O: 0 }, b0 = (it.spec.bodies || []).find((q) => q.id === b.id) || b;
     if (!r.actB) r.actB = ipBox(it.ink || [], it.pics || []);
@@ -2505,7 +2541,7 @@ function lifeWorldNow() {
   if (now - lifeWorld.t < 400 && (!pw || lifeWorld.n === n)) return lifeWorld;
   const strokes = []; for (const r of allStrokes()) { const b = sbox(r.s), w = b[2] - b[0], h = b[3] - b[1]; strokes.push({ b, s: r.s, ground: (w > 2.5 * h && w > 60) || w > 260 }); }
   /* out on the paper a frameless picture (an animal's empty box) is not a wall: the animal's body is met where it is (lifeMet) */
-  const boxes = []; for (const it of (S.page && S.page.items) || []) { if (it.type === 'life' || it.lock || (it.spec && it.spec.bare) || (pw && (isBgItem(it) || (it.spec && it.spec.clean)))) continue; const b = pw && (!it.type || it.type === 'text') ? tightItemBox(it) : itemBox(it); if (b[2] - b[0] > 4 && b[3] - b[1] > 4) boxes.push(b); }
+  const boxes = []; for (const it of (S.page && S.page.items) || []) { if (it.type === 'life' || it.lock || (it.spec && it.spec.bare) || (pw && (isBgItem(it) || pwWalker(it)))) continue; const b = pw && (!it.type || it.type === 'text') ? tightItemBox(it) : itemBox(it); if (b[2] - b[0] > 4 && b[3] - b[1] > 4) boxes.push(b); }
   lifeWorld = { t: now, strokes, boxes, n }; return lifeWorld;
 }
 /* the moving things out on the paper a living picture meets (pagewalk.js): the animals' bodies and the drawings that move
@@ -2599,9 +2635,61 @@ function lifeThreat(it, rt, dt) {
     if (closing > 0.3 || (d < 0 && closing > 0.05)) { rt.flinch = 1; rt.flinchDir = ox > cx ? -1 : 1; rt.flinchUp = oy < cy; }
   }
 }
+/* a path the AI or the teacher's words gave, out on the paper (pagewalk.js): it is followed as given, but its own clock
+   (rt.pt) waits while an animal, a moving drawing or a box is in the way of its next step (it startles and waits for an
+   animal to go by; a box that stays there is gone round by skipping on along the path after a while), and a path along the
+   ground walks on the drawn lines and the tops of boxes under it */
+function lifePathPage(it, rt, dt) {
+  const b = it.beh, B = it.B, bw = B[2] - B[0], bh = B[3] - B[1], sp = b.sp || 1;
+  if (rt.pt == null) { rt.pt = 0; rt.pgy = 0; rt.pblock = 0; }
+  const keys = (b.path && Array.isArray(b.path.keys)) ? b.path.keys : [], flat = keys.every((k) => Math.abs(+k.dy || 0) < 2), sub = b.sub || 'walk4';
+  const at = (t) => { const q = lifePathAt(it, t); return [B[0] + q.dx, B[1] + q.dy + (rt.pgy || 0), B[2] + q.dx, B[3] + q.dy + (rt.pgy || 0)]; };
+  const ov = (a, q) => a[0] < q[2] && a[2] > q[0] && a[1] < q[3] && a[3] > q[1];
+  const now = at(rt.pt), next = at(rt.pt + dt * sp), Wd = lifeWorldNow(), m = Math.min(bw, bh) * 0.12;
+  const shrink = (q) => [q[0] + m, q[1] + m, q[2] - m, q[3] - m];
+  let who = null;
+  /* in the way: what its next step would go into, or (when an animal has come up against it) closer into */
+  const cen = (q) => [(q[0] + q[2]) / 2, (q[1] + q[3]) / 2], closer = (q) => { const a = cen(now), z = cen(next), c = cen(q); return Math.hypot(z[0] - c[0], z[1] - c[1]) < Math.hypot(a[0] - c[0], a[1] - c[1]) - 1e-6; };
+  for (const o of lifeMet()) if (ov(shrink(next), o[0]) && (!ov(shrink(now), o[0]) || closer(o[0]))) { who = o; break; }
+  const walks = flat && LIFE_GROUND.includes(sub);
+  let wall = false; if (!who) for (const q of Wd.boxes) if (ov(shrink(next), q) && !ov(shrink(now), q) && !(walks && q[1] > next[3] - bh * 0.6)) { wall = true; break; } /* a low box under its feet is ground, not a wall */
+  if (who || wall) {
+    rt.pblock += dt; rt.met = who ? who[3] : rt.met;
+    if (rt.pblock < dt * 1.5) { rt.scare = Math.min(1, (rt.scare || 0) + 0.7); rt.bump = 1; }
+    /* an animal goes by in a few seconds; a box stays: after a while it goes on along its path past it */
+    if (rt.pblock > (wall ? 1.2 : 5)) { const dur = Math.max(0.2, ...keys.map((k) => +k.t || 0)); let t = rt.pt, clear = null; for (let i = 0; i < 80 && t < rt.pt + dur; i++) { t += 0.1; const q = at(t); if (!Wd.boxes.some((x) => ov(shrink(q), x)) && !lifeMet().some((o) => ov(shrink(q), o[0]))) { clear = t; break; } } if (clear != null) rt.pt = clear; rt.pblock = 0; } /* no clear place further along (its path ends in the thing): it keeps waiting, never into it */
+  } else { rt.pt += dt * sp; rt.pblock = 0; }
+  /* along the ground: up onto a drawn line or the top of a box under it, as a walking picture does */
+  if (walks) {
+    const q = lifePathAt(it, rt.pt), xa = B[0] + q.dx + bw * 0.25, xb = B[2] + q.dx - bw * 0.25, g0 = rt.pgy || 0, up = Math.max(bh * 2, 120), ya = Math.max(B[3] - up, B[3] + g0 - bh * 0.6), yb = Math.min(B[3] + bh * 0.25, B[3] + g0 + bh * 0.25); let top = null;
+    for (const o of Wd.strokes) { if (!o.ground) continue; const r = o.b; if (r[2] < xa || r[0] > xb || r[3] < ya || r[1] > yb) continue; const y = lifeTopIn(o.s, xa, xb, ya, yb); if (y != null && (top == null || y < top)) top = y; }
+    for (const r of Wd.boxes) { if (r[2] < xa || r[0] > xb || r[1] < ya || r[1] > yb) continue; if (top == null || r[1] < top) top = r[1]; }
+    const tgt = top == null ? (g0 < 0 ? Math.min(0, g0 + bh * 0.25) : 0) : top - B[3]; rt.pgy = g0 + (tgt - g0) * Math.min(1, dt * 8);
+  } else rt.pgy = 0;
+  if (rt.scare) rt.scare = Math.max(0, rt.scare - dt * 0.9); if (rt.bump) rt.bump = Math.max(0, rt.bump - dt * 4);
+  const q = lifePathAt(it, rt.pt); rt.px = q.dx; rt.py = q.dy + rt.pgy; rt.dx = 0;
+  /* legs and wings keep going while it walks along (their clocks follow its own) */
+  if (rt.hp == null) { rt.hp = 0; rt.gp = 0; rt.v = 0; rt.alt = 0; }
+  rt.gp += dt * sp * (rt.pblock ? 0.3 : 2.2); rt.hp += dt * sp / 0.95;
+}
+/* a shy one (a bird, a fish, a hopping thing) out on the paper does not wait to be bumped: something coming at it (another
+   picture, an animal, a thing moved by physics) startles it before it gets there, as the real one would (pagewalk.js) */
+function lifeShy(it, rt, dt) {
+  rt.shyT = Math.max(0, (rt.shyT || 0) - dt); if (rt.shyT > 0 || rt.state !== 'go') return;
+  const me = lifeBox(it, rt), cx = (me[0] + me[2]) / 2, cy = (me[1] + me[3]) / 2, sz = Math.max(me[2] - me[0], me[3] - me[1]);
+  const near = []; for (const [id2, r2] of LIFE) { if (id2 === it.id) continue; const o = findItem(id2); if (!o || !o.beh || !o.B) continue; if (!(o.beh.move || o.beh.k === 'phys' || o.beh.k === 'path')) continue; near.push([id2, lifeBox(o, r2)]); }
+  for (const m of lifeMet()) near.push([m[3], m[0]]);
+  const seen = rt.shySeen || (rt.shySeen = {});
+  for (const [id2, q] of near) {
+    const ox = (q[0] + q[2]) / 2, oy = (q[1] + q[3]) / 2, d = Math.hypot(ox - cx, oy - cy) - (sz + Math.max(q[2] - q[0], q[3] - q[1])) / 2, prev = seen[id2]; seen[id2] = [ox, oy];
+    if (!prev || d > sz * 0.8) continue;
+    const closing = Math.hypot(prev[0] - cx, prev[1] - cy) - Math.hypot(ox - cx, oy - cy);
+    if (closing > 0.4) { rt.shyT = 2.5; rt.met = id2; if (rt.dir === (ox > cx ? -1 : 1)) { rt.scare = 1; if (it.beh.k === 'flap') rt.climb = 1; else if (it.beh.k === 'swim') rt.dart = 1; else rt.v = Math.max(rt.v || 0, (LIFE_SPEED[it.beh.k] || 60) * 2); } else lifeReact(it, rt, it.beh.k, 0.6); return; }
+  }
+}
 function lifeMove(it, rt, dt) {
   if (it.beh.k === 'phys') { lifePhys(it, rt, dt); return; }
-  if (it.beh.k === 'path') { const q = lifePathAt(it, rt.t); rt.px = q.dx; rt.py = q.dy; rt.dx = 0; return; }
+  if (it.beh.k === 'path') { if (pwOn() && lifeTouch(it.beh)) { lifePathPage(it, rt, dt); return; } const q = lifePathAt(it, rt.t); rt.px = q.dx; rt.py = q.dy; rt.dx = 0; return; }
   lifeThreat(it, rt, dt);
   const b = it.beh, k = b.k, B = it.B, bw = B[2] - B[0], base = (LIFE_SPEED[k] || 60) * (b.sp || 1);
   if (rt.seed == null) rt.seed = Math.random() * 50;
@@ -2620,6 +2708,7 @@ function lifeMove(it, rt, dt) {
   if (k === 'walk4') { const L = (rt.legs && rt.legs.L) || bw * 0.3; rt.gp += dt * rt.v / (0.242 * L); }
   if (k === 'flap') { const fl = ((rt.t + rt.seed) % 3.4) < 2.3; rt.alt = clamp(rt.alt + (fl ? -1 : 0.7) * dt * (B[3] - B[1]) * 0.22, -(B[3] - B[1]) * 0.7, (B[3] - B[1]) * 0.5); }
   if (lifeTouch(b)) { try { lifeSense(it, rt, dt); } catch (e) { /* keep moving without sensing */ } } else rt.gy = 0;
+  if (lifeTouch(b) && pwOn() && (k === 'flap' || k === 'swim' || k === 'hop')) lifeShy(it, rt, dt);
   if (rt.bump) rt.bump = Math.max(0, rt.bump - dt * 4);
   if (rt.recoil) { const step = rt.recoil * Math.min(1, dt * 10); rt.dx += step; rt.recoil -= step; if (Math.abs(rt.recoil) < 0.3) rt.recoil = 0; }
   if (rt.scare) rt.scare = Math.max(0, rt.scare - dt * 0.9);
@@ -2684,7 +2773,7 @@ function lifeDraw(it, rt) {
   if (k === 'phys') { ox = rt.px || 0; oy = rt.py || 0; rot = rt.ang || 0; px = cx; py = cy; sx = sy = 1; }
   /* a path the AI or the teacher's words gave: the body follows it while its own movement (wings beating, legs walking) goes on */
   let pathDir = 0;
-  if (isPath) { const q = lifePathAt(it, T0), q2 = lifePathAt(it, T0 + 0.06); pathDir = Math.abs(q2.dx - q.dx) > 0.2 ? Math.sign(q2.dx - q.dx) : (rt.pathDir || 0); rt.pathDir = pathDir; const wob = k === 'flap' ? Math.sin(t * 9 + Math.PI) * bh * 0.05 * A : 0; ox = q.dx; oy = q.dy + wob; rot = q.rot + (k === 'flap' ? -(pathDir || face) * clamp((q2.dy - q.dy) * 0.02, -0.35, 0.35) : 0); sx = sy = q.s; px = cx; py = cy; }
+  if (isPath) { const PT = rt.pt != null ? rt.pt : T0, q = lifePathAt(it, PT), q2 = lifePathAt(it, PT + 0.06); pathDir = Math.abs(q2.dx - q.dx) > 0.2 ? Math.sign(q2.dx - q.dx) : (rt.pathDir || 0); rt.pathDir = pathDir; const wob = k === 'flap' ? Math.sin(t * 9 + Math.PI) * bh * 0.05 * A : 0; ox = q.dx; oy = q.dy + (rt.pgy || 0) + wob; rot = q.rot + (k === 'flap' ? -(pathDir || face) * clamp((q2.dy - q.dy) * 0.02, -0.35, 0.35) : 0); sx = sy = q.s; px = cx; py = cy; }
   if (lifeTouch(b) && LIFE_GROUND.includes(k)) oy += rt.gy || 0;
   if (rt.bump) { const q = rt.bump; sx *= 1 - 0.12 * q; sy *= 1 + 0.08 * q; }
   /* the body goes with the face: leaning in to shout, shaking with laughter, slumping when sad, jumping back when surprised */
@@ -3124,7 +3213,7 @@ function animKick(on) { if (on && !lifeRaf && LIFE.size) lifeRaf = requestAnimat
    The parts live in separate scopes, so this is the same work done here for the pictures; the animals keep their own ----- */
 function pwOn() { return typeof flagOn !== 'function' || flagOn('pagemove'); }
 /* what walks by itself on the page: it is not ground or a wall for the others (they meet it as a moving thing) */
-function pwWalker(it) { return !!(it && (it.type === 'life' || (it.spec && (it.spec.bare || it.spec.clean)))); }
+function pwWalker(it) { return !!(it && (it.type === 'life' || (it.spec && (it.spec.bare || it.spec.clean)) || (it.type === 'scene' && it.fr === 0 && it.spec && it.spec.domain === 'phys' && it.spec.dim !== 3))); }
 let PW_ENV = null, PW_T = 0;
 function pwEnvSig() {
   let n = 0, a = 0; for (const r of allStrokes()) { const p = r.s.p || []; n++; a = (a * 31 + p.length + (p[0] | 0) + (p[1] | 0)) % 2147483647; }
@@ -3190,7 +3279,7 @@ function pwSurfaces(it, r, sp) {
   /* the page and its world as it was last drawn (phDraw's map); a drawn person that turned back is drawn mirrored about
      where it turned (ipTurn), and the page is seen the same way */
   const mp = r.map || { sc: W / Math.max(1e-6, sp.world.w || 1), ox: 0, oy: 0, x0: 0, y0: 0, h: it.h || 0 }, K = mp.sc, m = r.mir || { s: 1, O: 0 }, out = [];
-  const bx = it.x || 0, by = (it.y || 0) + mp.h - mp.oy;
+  const bx = r.org ? r.org[0] : it.x || 0, by = (r.org ? r.org[1] : it.y || 0) + mp.h - mp.oy; /* r.org: where the model's canvas begins on the page (scOutDraw) */
   const px = (x) => bx + m.s * (mp.ox + (x - mp.x0) * K) + m.O, py = (y) => by - (y - mp.y0) * K;
   const toW = (x, y) => [((x - bx - m.O) / m.s - mp.ox) / K + mp.x0, (by - y) / K + mp.y0];
   /* the boxes it was drawn over (or that were put over it) are not in its way, as with an animal */
@@ -3201,6 +3290,10 @@ function pwSurfaces(it, r, sp) {
     if (b.shape === 'person') { const hx = px(b.x), H0 = (b.hgt || 1.7) * K; rect = [hx - 0.6 * H0, py(b.y + 0.8 * b.hgt), hx + 0.6 * H0, py(b.y) + 1.6 * H0]; }
     else { const rr = ((b.hsz || Math.max(b.w || 0, b.h || 0, 2 * (b.r || 0)))) * K + Math.hypot(b.vx || 0, b.vy || 0) * K * 0.05 + 30, cx = px(b.x), cy = py(b.y); rect = [cx - rr, cy - rr, cx + rr, cy + rr]; }
     for (const q of pwNear(rect, r.pwSkip)) { const a = toW(q[0], q[1]), z = toW(q[2], q[3]); out.push({ x1: a[0], y1: a[1], x2: z[0], y2: z[1], mu: 0.4, mus: 0.5, _pg: 1 }); }
+    /* every other moving thing is solid too: the living pictures, the drawings moved by physics and the bodies of other
+       models (owner 23 พ.ย. 2569: every thing answers every other as the real thing would) */
+    const bc = [px(b.x), py(b.y)];
+    for (const q of pwMovers(it.id)) { if (q[2] < rect[0] || q[0] > rect[2] || q[3] < rect[1] || q[1] > rect[3]) continue; if (bc[0] > q[0] && bc[0] < q[2] && bc[1] > q[1] && bc[1] < q[3]) continue; /* already over it (drawn there): not pushed out */ for (const s of [[q[0], q[3], q[0], q[1]], [q[0], q[1], q[2], q[1]], [q[2], q[1], q[2], q[3]], [q[2], q[3], q[0], q[3]]]) { const a = toW(s[0], s[1]), z = toW(s[2], s[3]); out.push({ x1: a[0], y1: a[1], x2: z[0], y2: z[1], mu: 0.3, mus: 0.4, _pg: 1, _an: 1 }); } }
     for (const A of pwAnimals()) { const q = A.box; if (q[2] < rect[0] || q[0] > rect[2] || q[3] < rect[1] || q[1] > rect[3]) continue; const c = [[q[0], q[3], q[0], q[1]], [q[0], q[1], q[2], q[1]], [q[2], q[1], q[2], q[3]]]; for (const s of c) { const a = toW(s[0], s[1]), z = toW(s[2], s[3]); out.push({ x1: a[0], y1: a[1], x2: z[0], y2: z[1], mu: 0.3, mus: 0.4, _pg: 1, _an: 1 }); } }
   }
   return out;
@@ -3212,5 +3305,70 @@ function pwSpec(it, r, sp) {
   /* a person stands on what is under its feet: a line or a box up to a small step higher, not one over its head */
   if (p && p.kin) { v._gl = Math.min(p.kin.fl[1], p.kin.fr[1]); v._gs = 0.15 * (p.hgt || 1.7); }
   return v;
+}
+/* what else is on the page, for a request in words (motionPlan with AI, motionTargeted without): the animals out on the
+   paper by their Thai names, the moving pictures, and the boxes of text and pictures, with where each one is now */
+function pwThings(skip) {
+  const out = [];
+  for (const it of visibleItems()) {
+    if (skip && skip.includes(it.id)) continue;
+    let box = null, what = '';
+    if (it.type === 'scene' && it.spec && it.spec.animal) { box = typeof anVis === 'function' ? anVis(it.id) : null; if (!box) box = itemBox(it); what = 'animal ' + (it.spec.title || it.spec.animal) + ' (' + it.spec.animal + ')'; }
+    else if (it.type === 'life' && it.B && typeof LIFE !== 'undefined' && LIFE.get(it.id)) { box = lifeBox(it, LIFE.get(it.id)); what = 'moving picture'; }
+    else if (pwWalker(it) || isBgItem(it)) continue;
+    else if (!it.type || it.type === 'text') { box = tightItemBox(it); what = 'text box "' + String(it.md || '').replace(/\s+/g, ' ').slice(0, 30) + '"'; }
+    else { box = itemBox(it); what = it.type === 'img' ? 'picture' : it.type + ' box'; }
+    if (box && box[2] - box[0] > 2) out.push({ id: it.id, what, title: it.spec && it.spec.animal ? it.spec.title || '' : '', box: box.slice(0, 4).map(Math.round) });
+    if (out.length >= 24) break;
+  }
+  return out;
+}
+/* the boxes of the other moving things on the page now (not the animals: pwAnimals), leaving out the one asking */
+function pwMovers(self) {
+  const out = [];
+  if (typeof LIFE !== 'undefined') for (const [id, rt] of LIFE) { if (id === self) continue; const o = findItem(id); if (!o || !o.B || !o.beh || !rt.cv || !rt.cv.isConnected) continue; const q = lifeBox(o, rt), m = Math.min(q[2] - q[0], q[3] - q[1]) * 0.1; out.push([q[0] + m, q[1] + m, q[2] - m, q[3] - m]); }
+  try { for (const o of ipActors()) if (o.id !== self) out.push(o.box); } catch (e) { /* not ready */ }
+  return out;
+}
+/* a tap of a finger or the mouse on something that moves (owner 23 พ.ย. 2569: every thing and every happening answers as the
+   real thing would): a living picture startles and runs, flies or darts away from the finger (a standing one flinches), a
+   ball or a thing moved by physics is knocked away from it, a drawn person stops and turns. The animals answer taps
+   themselves (anTap). Nothing is saved */
+function pwTap(x, y) {
+  if (!pwOn() || S.show) return false;
+  const near = (q, m) => x >= q[0] - m && x <= q[2] + m && y >= q[1] - m && y <= q[3] + m;
+  /* the bodies of models and the drawings moved by physics */
+  for (const [id, r] of SCN) {
+    const it = findItem(id); if (!it || !it.spec || it.spec.dim === 3 || it.spec.domain !== 'phys' || !r.st || !r.map || !r.cv || !r.cv.isConnected) continue;
+    const mp = r.map, m = r.mir || { s: 1, O: 0 }, org = r.org || [it.x || 0, it.y || 0];
+    for (const b of r.st.bodies) {
+      if (b.fixed) continue;
+      const X = org[0] + m.s * mp.X(b.x) + m.O, Y = org[1] + mp.Y(b.y), R = b.shape === 'person' ? (b.hgt || 1.7) * mp.sc * 0.5 : (b.shape === 'ball' ? b.r : (b.hsz || Math.max(b.w || 0, b.h || 0) / 2)) * mp.sc;
+      if (Math.hypot(x - X, y - (b.shape === 'person' ? Y - R * 0.3 : Y)) > R + 10) continue;
+      if (b.shape === 'person') { if (!r.turning && !r.peek) r.peek = 0.45; }
+      else { const d = x < X ? 1 : -1, k = Math.max(1, Math.min(4, 120 / Math.max(10, R))); b.vx = (b.vx || 0) + d * 1.8 * k; b.vy = Math.max(b.vy || 0, 0) + 2.2 * k; if (b.om != null) b.om += -d * 3; }
+      if (!r.playing) { r.playing = true; if (!scnRaf) scnRaf = requestAnimationFrame(scTick); }
+      return true;
+    }
+  }
+  /* the living pictures */
+  if (typeof LIFE !== 'undefined') for (const [id, rt] of LIFE) {
+    const it = findItem(id); if (!it || !it.B || !it.beh || !rt.cv || !rt.cv.isConnected) continue;
+    const q = lifeBox(it, rt); if (!near(q, 6)) continue;
+    const b = it.beh, k = b.k, cx = (q[0] + q[2]) / 2, away = x < cx ? 1 : -1;
+    if (k === 'phys') { rt.vx = (rt.vx || 0) + away * 420; rt.vy = Math.min(rt.vy || 0, 0) - 520; rt.w = (rt.w || 0) + away * 6; rt.sleep = 0; }
+    else if (k === 'path') { rt.scare = 1; rt.bump = 1; rt.pblock = 0; }
+    else if (b.move && b.edge !== 'stay') {
+      rt.scare = 1; rt.jolt = 1;
+      if (k === 'flap') { rt.climb = 1; if (rt.dir !== away) { rt.state = 'turn'; rt.tp = 0; rt.flipped = false; } }
+      else if (k === 'swim') { rt.dart = 1; if (rt.dir !== away) { rt.state = 'turn'; rt.tp = 0.2; rt.flipped = false; } }
+      else if (rt.dir === away) { rt.state = 'go'; rt.v = Math.max(rt.v || 0, (LIFE_SPEED[k] || 60) * (b.sp || 1) * 2.2); } /* the finger behind it: it runs on */
+      else { rt.state = 'turn'; rt.tp = 0; rt.flipped = false; rt.recoil = away * Math.min(24, (q[2] - q[0]) * 0.15); } /* in front: it jumps back and turns */
+    } else { rt.flinch = 1; rt.flinchDir = away; rt.flinchUp = y < (q[1] + q[3]) / 2; rt.scare = Math.max(rt.scare || 0, 0.8); }
+    if (!rt.playing && typeof animOn === 'function' && animOn()) rt.playing = true;
+    if (!lifeRaf) lifeRaf = requestAnimationFrame(lifeTick);
+    return true;
+  }
+  return false;
 }
 
