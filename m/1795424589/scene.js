@@ -616,7 +616,7 @@ function scRender(it, r) {
 function anMargin(w0, h0) { return [Math.round(w0 * 0.3), Math.round(h0 * 0.6), Math.round(w0 * 0.3), Math.round(h0 * 0.25)]; }
 /* an animal: drawn as w0 x h0 (its box) on a canvas that is bigger by anMargin all round and lies over the box */
 function anRender(it, r) {
-  const cv = r.cv, bx = r.box, sp = it.spec, w0 = bx.clientWidth || 340, h0 = bx.clientHeight || 255, m = anMargin(w0, h0), W2 = w0 + m[0] + m[2], H2 = h0 + m[1] + m[3];
+  const cv = r.cv, bx = r.box, sp = it.spec, w0 = bx.clientWidth || 340, h0 = bx.clientHeight || 255, g = r.anGrow || (r.anGrow = [0, 0, 0, 0]), m = anMargin(w0, h0).map((v, i) => v + g[i]), W2 = w0 + m[0] + m[2], H2 = h0 + m[1] + m[3];
   const pos = [bx.offsetLeft - m[0], bx.offsetTop - m[1], W2, H2].join();
   if (cv._pos !== pos) { cv._pos = pos; cv.style.left = (bx.offsetLeft - m[0]) + 'px'; cv.style.top = (bx.offsetTop - m[1]) + 'px'; cv.style.width = W2 + 'px'; cv.style.height = H2 + 'px'; }
   r.anM = m;
@@ -627,6 +627,14 @@ function anRender(it, r) {
   c.setTransform(dpr, 0, 0, dpr, m[0] * dpr, m[1] * dpr);
   if (!sp.clean) { c.fillStyle = '#FFFFFF'; c.fillRect(0, 0, w0, h0); }
   sc3Render(c, w0, h0, sp, r);
+  /* it went close to the edge of its canvas (a bird flying off high, a squid's cloud of ink): that side of the canvas grows,
+     and this picture is drawn again on it, so nothing of it is ever cut (owner 22 พ.ย. 2569) */
+  const bb = r.anBB;
+  if (bb && !r.anGrowing) {
+    const room = [m[0] + bb[0], m[1] + bb[2], w0 + m[2] - bb[1], h0 + m[3] - bb[3]], dim = [w0, h0, w0, h0]; let grew = false;
+    for (let i = 0; i < 4; i++) if (room[i] < 8 && g[i] < dim[i] * 2.5) { g[i] += Math.max(dim[i] * 0.3, 20 - room[i]); grew = true; }
+    if (grew) { r.anGrowing = 1; try { anRender(it, r); } finally { r.anGrowing = 0; } return; }
+  }
   if (r.ro) r.ro.innerHTML = (r.read || []).map(([k, v]) => '<span><b>' + esc(String(k)) + '</b> ' + esc(String(v)) + '</span>').join('');
 }
 /* ---------- the box on the page ---------- */

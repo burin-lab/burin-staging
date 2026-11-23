@@ -485,11 +485,12 @@ function anDraw(c, w, h, sp, r) {
   if (D.props && !(sp.thumb && D.props === anGrassField) && (!pg || s.porg)) { if (pg) b.push([s.porg[0], s.porg[1], 0]); D.props(b, s, C); if (pg) b.pop(); }
   b.clip = !!D.clip;
   if (!s.hidden) { const tl = pg && pg.sl ? pg.sl * Math.cos(s.h - cm.yaw) : 0; b.push([s.x, s.y, s.z], tl ? anMm(anRz(s.h), anRy(-tl)) : anRz(s.h)); D.draw(b, s, C, D); b.pop(); }
-  for (const q of s.ink) { const u = q.t / 3.2, p = anAdd(q.p, anMul(q.v, Math.min(q.t, 1.6))); gs.L.push({ t: 'b', d: P(p[0], p[1], p[2])[2] - 1e-4, q: P(p[0], p[1], p[2]), r: Math.max(2, q.r * (1 + u * 2.5) * P(p[0], p[1], p[2])[3]), col: 'rgba(30,30,40,' + (0.32 * (1 - u)).toFixed(2) + ')', ink: 1 }); }
+  /* on the paper the view goes with the animal, so its ink goes along around it (left behind it would be cut off the canvas) */
+  for (const q of s.ink) { const u = q.t / 3.2, p = anAdd(pg ? anAdd(q.p, [s.x - q.p[0], s.y - q.p[1], 0]) : q.p, anMul(q.v, Math.min(q.t, 1.6))); gs.L.push({ t: 'b', d: P(p[0], p[1], p[2])[2] - 1e-4, q: P(p[0], p[1], p[2]), r: Math.max(2, q.r * (1 + u * 2.5) * P(p[0], p[1], p[2])[3]), col: 'rgba(30,30,40,' + (0.32 * (1 - u)).toFixed(2) + ')', ink: 1 }); }
   if (direct) { g.draw(c); anGrain(c, g, r); c.save(); c.globalCompositeOperation = 'destination-over'; under(); c.restore(); }
   else if (pen && AN_PEN) anPencil(c, g, r); else g.draw(c);
   anSharp(c, gs);
-  if (r.box && r.anM && !sp.thumb) { const bx = anClip(c.canvas, w, h, [g, gs], s, P, D, r.anM, !pg), q = P(s.x, s.y, 0), q0 = q[0]; if (pg && bx) { pg.ext = [bx[0] - q0, bx[1] - q0]; pg.headH = Math.max(0, q[1] - bx[2] - Math.max(0, s.z) * q[3]); } }
+  if (r.box && r.anM && !sp.thumb) { const bx = anClip(c.canvas, w, h, [g, gs], s, P, D, r.anM, !pg), q = P(s.x, s.y, 0), q0 = q[0]; r.anBB = bx; if (pg && bx) { pg.ext = [bx[0] - q0, bx[1] - q0]; pg.headH = Math.max(0, q[1] - bx[2] - Math.max(0, s.z) * q[3]); } }
   const doing = r.pg && r.pg.gone ? 'ถูก' + r.pg.gone.by + 'จับกิน อีกสักพักจะมีตัวใหม่เดินเข้ามา' : s.rx && s.rx.say ? ((AN_WSAY1[D.id] || {})[s.rx.wk || ''] || s.rx.say) : s.rx ? ((AN_SAY[D.id] || {})[s.rx.k] || D.acts[s.rx.k] || AN_DO[s.rx.k] || D.acts.flee) : (D.acts[s.act] || '');
   /* the menu of the box shows the first two: the animal with its group, and the trait exam questions ask about */
   r.read = [['สัตว์', D.th + ' (' + D.grp + ')']]; if (D.fact) r.read.push(['จุดเด่น', D.fact]); r.read.push(['กำลัง', doing]);
@@ -569,7 +570,7 @@ function anEnv(dt) {
     const step = p.length > 900 ? 9 : p.length > 180 ? 6 : 3; /* every point of a short line (its corners), every second or third of a long one */
     for (let i = step; ; i += step) { const j = Math.min(i, p.length - 3), x = p[j] / 10, y = p[j + 1] / 10; if (Math.hypot(x - px, y - py) > 0.5) { seg.push([px, py, x, y]); px = x; py = y; } if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; if (j >= p.length - 3) break; }
     const f0 = p[0] / 10, g0 = p[1] / 10; x0 = Math.min(x0, f0); x1 = Math.max(x1, f0); y0 = Math.min(y0, g0); y1 = Math.max(y1, g0);
-    if (seg.length) L.push({ b: [x0, y0, x1, y1], seg });
+    if (seg.length) L.push({ b: [x0, y0, x1, y1], seg, k: 'L:' + (st.id || p[0] + ',' + p[1] + ',' + p.length) });
   }
   /* boxes: their top to stand on and their sides to bump into (a text box only where its words are) */
   const R = [];
@@ -583,7 +584,7 @@ function anEnv(dt) {
 }
 /* the segments near x0..x1 (and the boxes the animal is not standing inside) */
 function anEnvNear(E, x0, x1, skip) {
-  const out = []; for (const l of E.L) if (l.b[2] >= x0 && l.b[0] <= x1) for (const q of l.seg) out.push(q);
+  const out = []; for (const l of E.L) if (l.b[2] >= x0 && l.b[0] <= x1 && !skip.has(l.k)) for (const q of l.seg) out.push(q);
   for (const o of E.R) if (!skip.has(o.id) && o.b[2] >= x0 && o.b[0] <= x1) for (const q of o.seg) out.push(q);
   return out;
 }
@@ -682,6 +683,23 @@ function anPage(it, r, dt) {
   const nx = pg.fx + dx, ex = pg.ext || [-cw * 0.25, cw * 0.25], sg = dx >= 0 ? 1 : -1, front = anCl(sg > 0 ? ex[1] : -ex[0], 4, cw * 0.48) * sg;
   /* the boxes it stands in front of (put down over them) do not stop it */
   const skip = new Set(); for (const q of E.R) if (pg.fx > q.b[0] && pg.fx < q.b[2] && pg.fy - zp > q.b[1] + stepUp && pg.fy - zp - body < q.b[3]) skip.add(q.id);
+  /* a line drawn across its body (owner 23 พ.ย. 2569: a cat with lines written over it stood stuck on them): it is not a
+     wall or ground for this animal until it has walked clear of it, so it walks off it whichever way it goes */
+  {
+    const ex0 = pg.ext || [-cw * 0.25, cw * 0.25], fe0 = pg.fy - zp, bx = [pg.fx + ex0[0], fe0 - (pg.headH || body), pg.fx + ex0[1], fe0 - stepUp];
+    const over = (l) => l.b[2] >= bx[0] && l.b[0] <= bx[2] && l.b[3] >= bx[1] && l.b[1] <= bx[3] && l.seg.some((q) => Math.max(q[0], q[2]) >= bx[0] && Math.min(q[0], q[2]) <= bx[2] && Math.max(q[1], q[3]) >= bx[1] && Math.min(q[1], q[3]) <= bx[3]);
+    const first = !pg.under; if (first) { pg.under = new Set(); pg.known = new Set(); }
+    if (pg.envSeen !== E) {
+      pg.envSeen = E;
+      for (const l of E.L) if (!pg.known.has(l.k)) {
+        pg.known.add(l.k); if (!over(l)) continue; pg.under.add(l.k);
+        /* written over just now (not there when it was put down): the pen came across it, so it starts away from the line,
+           the way it answers a touch */
+        if (!first && !s.rx && !s.hidden) { const side = (l.b[0] + l.b[2]) / 2 > pg.fx ? -1 : 1; pg.dir = side; anReact(D, s, [pg.R[0] * side, pg.R[1] * side, 0]); }
+      }
+    }
+    if (pg.under.size) for (const l of E.L) if (pg.under.has(l.k)) { if (over(l)) skip.add(l.k); else pg.under.delete(l.k); }
+  }
   /* the nose sweeps from where it was last time (turning round brings the nose round to the other side: it does not jump
      through a line that way) */
   const nose0 = pg.nose != null && pg.noseSg === sg ? pg.nose : pg.fx + front;
