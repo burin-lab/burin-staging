@@ -220,7 +220,12 @@ function anHopTo(D, s, dt, tg, spd, big) {
   s.hop = { u: 0, a: [s.x, s.y, 0], b: [b[0], b[1], 0], len, T: (big ? 1.25 : 1) * (D.hopT || 0.45), H: (big ? D.jumpH : D.hopH) || 0.2 };
   return false;
 }
-function anNext(D, s) { s.si = (s.si + 1) % D.loop.length; s.porg = null; s.aT = 0; s.ap = 0; s.tg = null; s.act = D.loop[s.si][0]; if (D.enter) D.enter(s, s.act); }
+function anNext(D, s) {
+  /* out on the paper its day is not a fixed round: the next of its own doings is drawn at random (not the same one again),
+     each for longer or shorter, as a real one does (owner 22 พ.ย. 2569); in its box the round stays as it was */
+  if (AN_FREE && D.loop.length > 2) { let i = s.si; for (let k = 0; k < 5 && i === s.si; k++) i = Math.floor(anRng(s) * D.loop.length); s.si = i; s.durK = 0.6 + anRng(s) * 0.9; }
+  else s.si = (s.si + 1) % D.loop.length;
+  s.porg = null; s.aT = 0; s.ap = 0; s.tg = null; s.act = D.loop[s.si][0]; if (D.enter) D.enter(s, s.act); }
 function anStep(D, s, dt) {
   s.t += dt;
   if (s.rx) anRx1(D, s, dt);
@@ -231,7 +236,7 @@ function anStep(D, s, dt) {
     if (s.z < 0.02 && Math.hypot(s.landTg[0] - s.x, s.landTg[1] - s.y) < 0.06) { s.z = 0; s.vz = 0; s.landTg = null; s.v = 0; }
     s.act = 'land';
   } else {
-    const cur = D.loop[s.si], act = cur[0], dur = cur[1]; s.act = act; s.aT += dt; s.ap = Math.min(1, s.aT / dur);
+    const cur = D.loop[s.si], act = cur[0], dur = cur[1] * (AN_FREE && s.durK ? s.durK : 1); s.act = act; s.aT += dt; s.ap = Math.min(1, s.aT / dur);
     if (D.tick && D.tick(s, dt, act) === true) { /* the animal moves itself in this step */ }
     else if (act === 'go' || act === 'fly' || act === 'run') {
       if (!s.tg) s.tg = anTarget(D, s);
@@ -480,11 +485,12 @@ function anDraw(c, w, h, sp, r) {
   if (D.props && !(sp.thumb && D.props === anGrassField) && (!pg || s.porg)) { if (pg) b.push([s.porg[0], s.porg[1], 0]); D.props(b, s, C); if (pg) b.pop(); }
   b.clip = !!D.clip;
   if (!s.hidden) { const tl = pg && pg.sl ? pg.sl * Math.cos(s.h - cm.yaw) : 0; b.push([s.x, s.y, s.z], tl ? anMm(anRz(s.h), anRy(-tl)) : anRz(s.h)); D.draw(b, s, C, D); b.pop(); }
-  for (const q of s.ink) { const u = q.t / 3.2, p = anAdd(q.p, anMul(q.v, Math.min(q.t, 1.6))); gs.L.push({ t: 'b', d: P(p[0], p[1], p[2])[2] - 1e-4, q: P(p[0], p[1], p[2]), r: Math.max(2, q.r * (1 + u * 2.5) * P(p[0], p[1], p[2])[3]), col: 'rgba(30,30,40,' + (0.32 * (1 - u)).toFixed(2) + ')', ink: 1 }); }
+  /* on the paper the view goes with the animal, so its ink goes along around it (left behind it would be cut off the canvas) */
+  for (const q of s.ink) { const u = q.t / 3.2, p = anAdd(pg ? anAdd(q.p, [s.x - q.p[0], s.y - q.p[1], 0]) : q.p, anMul(q.v, Math.min(q.t, 1.6))); gs.L.push({ t: 'b', d: P(p[0], p[1], p[2])[2] - 1e-4, q: P(p[0], p[1], p[2]), r: Math.max(2, q.r * (1 + u * 2.5) * P(p[0], p[1], p[2])[3]), col: 'rgba(30,30,40,' + (0.32 * (1 - u)).toFixed(2) + ')', ink: 1 }); }
   if (direct) { g.draw(c); anGrain(c, g, r); c.save(); c.globalCompositeOperation = 'destination-over'; under(); c.restore(); }
   else if (pen && AN_PEN) anPencil(c, g, r); else g.draw(c);
   anSharp(c, gs);
-  if (r.box && r.anM && !sp.thumb) { const bx = anClip(c.canvas, w, h, [g, gs], s, P, D, r.anM, !pg), q = P(s.x, s.y, 0), q0 = q[0]; if (pg && bx) { pg.ext = [bx[0] - q0, bx[1] - q0]; pg.headH = Math.max(0, q[1] - bx[2] - Math.max(0, s.z) * q[3]); } }
+  if (r.box && r.anM && !sp.thumb) { const bx = anClip(c.canvas, w, h, [g, gs], s, P, D, r.anM, !pg), q = P(s.x, s.y, 0), q0 = q[0]; r.anBB = bx; if (pg && bx) { pg.ext = [bx[0] - q0, bx[1] - q0]; pg.headH = Math.max(0, q[1] - bx[2] - Math.max(0, s.z) * q[3]); } }
   const doing = r.pg && r.pg.gone ? 'ถูก' + r.pg.gone.by + 'จับกิน อีกสักพักจะมีตัวใหม่เดินเข้ามา' : s.rx && s.rx.say ? ((AN_WSAY1[D.id] || {})[s.rx.wk || ''] || s.rx.say) : s.rx ? ((AN_SAY[D.id] || {})[s.rx.k] || D.acts[s.rx.k] || AN_DO[s.rx.k] || D.acts.flee) : (D.acts[s.act] || '');
   /* the menu of the box shows the first two: the animal with its group, and the trait exam questions ask about */
   r.read = [['สัตว์', D.th + ' (' + D.grp + ')']]; if (D.fact) r.read.push(['จุดเด่น', D.fact]); r.read.push(['กำลัง', doing]);
@@ -570,6 +576,7 @@ function anEnv(dt) {
   const R = [];
   for (const it of visibleItems()) {
     if (AN_PAGE.has(it.id) || isBgItem(it) || it.type === 'life' || (it.spec && (it.spec.bare || it.spec.clean))) continue;
+    if (it.type === 'scene' && it.fr === 0 && it.spec && it.spec.domain === 'phys' && it.spec.dim !== 3 && (typeof flagOn !== 'function' || flagOn('pagemove'))) continue; /* a frameless model out on the paper: its bodies are met (anActors), not its box */
     const el = itemsEl.querySelector('[data-id="' + it.id + '"]'); if (!el || el.hidden || !el.offsetHeight) continue;
     const b = !it.type || it.type === 'text' ? tightItemBox(it) : itemBox(it); if (b[2] - b[0] < 4 || b[3] - b[1] < 4) continue;
     R.push({ id: it.id, b, seg: [[b[0], b[1], b[2], b[1]], [b[0], b[1], b[0], b[3]], [b[2], b[1], b[2], b[3]]] });
@@ -621,6 +628,11 @@ function anClip(cv, w, h, gl, s, P, D, M, box) {
   return ext;
 }
 function anUnclip(r) { const cv = r.cv; if (!cv) return; const el = cv.closest('.item'); if (el) el.classList.remove('onpage'); }
+/* is (x, y) on the way it has come (within 2 points of it) */
+function anOnTrail(T, x, y) {
+  for (let i = 0; i < T.length; i++) { const a = T[i], b = T[i + 1] || a, dx = b[0] - a[0], dy = b[1] - a[1], L = dx * dx + dy * dy, u = L ? Math.max(0, Math.min(1, ((x - a[0]) * dx + (y - a[1]) * dy) / L)) : 0; if (Math.hypot(a[0] + dx * u - x, a[1] + dy * u - y) < 2) return true; }
+  return false;
+}
 /* one tick of an animal out on the paper: 'draw' or 'skip' (this frame not drawn); false when it is not one (then it
    lives in its box as before) */
 function anPage(it, r, dt) {
@@ -632,10 +644,13 @@ function anPage(it, r, dt) {
   const bx = r.box || r.cv, s = r.st.an || (r.st.an = anNew(D)), cm = r.cam || CAM0, cw = bx.clientWidth, ch = bx.clientHeight; if (!cw || !ch) return false;
   const P = cam3(r, cw, ch, D.R || 1.1, D.tz || 0), o = P(0, 0, 0), k = o[3], fx0 = bx.offsetLeft + o[0], fy0 = bx.offsetTop + o[1];
   let pg = r.pg;
+  /* the page saved a moment ago and read back (the store's echo, or another device's copy of an older save) carries a
+     place it has just walked through: that is not a move, it stays where it is now */
+  if (pg && (pg.lx !== it.x || pg.ly !== it.y) && pg.trail && anOnTrail(pg.trail.concat([[pg.lx, pg.ly]]), it.x, it.y)) { it.x = pg.lx; it.y = pg.ly; }
   /* put down, moved, undone or come back from another device: it stands where its box now is */
   if (!pg || pg.lx !== it.x || pg.ly !== it.y) {
     pg = r.pg = { dir: Math.cos(s.h - cm.yaw) >= 0 ? 1 : -1, fx: it.x + fx0, fy: it.y + fy0, vy: 0, sl: 0, hold: 0, bt: 0, meet: {}, face: null };
-    pg.floor = pg.fy; pg.land = 1; pg.at = [it.x, it.y]; /* where it was put down */ if (s.perched && !s.porg) s.porg = [s.x, s.y];
+    pg.floor = pg.fy; pg.land = 1; pg.at = [it.x, it.y]; /* where it was put down */ pg.trail = [[it.x, it.y]]; if (s.perched && !s.porg) s.porg = [s.x, s.y];
   }
   pg.R = [Math.cos(cm.yaw), Math.sin(cm.yaw)];
   /* the animals' own clock (seconds): one that is not ticking any more (deleted, another page) falls behind and is left out */
@@ -709,8 +724,12 @@ function anPage(it, r, dt) {
   if (pg.land && !pg.vy) { pg.floor = pg.fy; pg.land = 0; }
   /* leans with the slope it walks on */
   const want = D.clip ? 0 : anCl(Math.atan(-sl), -0.6, 0.6); pg.sl += (want - pg.sl) * Math.min(1, 8 * dt);
+  /* how fast it goes along the page now, for the moving pictures it meets (pagewalk.js: a ball it walks into is kicked on) */
+  pg.vx = pg.pfx != null && dt > 0 ? (pg.fx - pg.pfx) / dt : 0; pg.pfx = pg.fx;
   it.x = Math.round((pg.fx - fx0) * 10) / 10; it.y = Math.round((pg.fy - fy0) * 10) / 10; pg.lx = it.x; pg.ly = it.y;
   el.style.left = it.x + 'px'; el.style.top = it.y + 'px';
+  /* where it has been in the last 15 seconds (to know its own echo, above) */
+  pg.trT = (pg.trT || 0) + dt; if (pg.trT >= 0.25) { pg.trT = 0; (pg.trail || (pg.trail = [])).push([it.x, it.y]); if (pg.trail.length > 60) pg.trail.shift(); }
   r.anAcc = (r.anAcc || 0) + dt; if (r.anAcc < (r.anMs > 14 ? 0.05 : 0.03)) return 'skip'; r.anAcc = 0;
   return 'draw';
 }
@@ -862,6 +881,12 @@ function anSocial(id, dt, E) {
   const A = AN_PAGE.get(id), t = A.t, p = A.pg; if (!A || p.gone) return;
   p.full = Math.max(0, (p.full || 0) - dt); p.calm = Math.max(0, (p.calm || 0) - dt); p.froze = Math.max(0, (p.froze || 0) - dt);
   if (p.thenWarn && !anBusy(A)) { p.thenWarn = 0; anReact(A.D, A.s, [p.R[0], p.R[1], 0]); } /* after its charge, the warning pose */
+  /* what just happened stays with it a while: after a fright it keeps looking round (and does nothing else of its own);
+     after a run that came to nothing a hunter rests, panting; after a meal it lies down */
+  const k0 = A.s.rx && A.s.rx.k; if (k0 && 'flee dart jump flyoff hide burrow ink flip puff'.indexOf(k0) >= 0) p.scared = 1;
+  else if (!k0 && p.scared) { p.scared = 0; p.alertT = 5 + anRng(A.s) * 4; p.alook = 0; }
+  if (k0 === 'eat') p.ate = 1; else if (!k0 && p.ate) { p.ate = 0; const i = A.D.loop.findIndex((x) => x[0] === 'rest' || x[0] === 'sit'); if (anDrive(A, 'wdo', null, 0, 10)) { A.s.rx.say = 'นอนพักหลังกินอิ่ม'; A.s.rx.wk = 'rest'; if (i >= 0) A.s.act = A.D.loop[i][0]; } p.wish = null; }
+  if (p.alertT > 0) { p.alertT -= dt; p.alook -= dt; if (p.alook <= 0 && !anBusy(A) && !p.hunt) { p.alook = 1.4; anLook(A, anRng(A.s) < 0.5 ? -1 : 1, 1); if (anDrive(A, 'wdo', null, 0, 1)) { A.s.rx.say = 'ระแวง มองรอบตัว'; A.s.rx.wk = 'alert'; } } }
   const a = anWhere(A), dA = A.D;
   /* the one it is after now: keep at it, catch it, or give up */
   if (p.hunt) {
@@ -869,7 +894,7 @@ function anSocial(id, dt, E) {
     if (!B || B.pg.gone || t - B.t > 0.4 || !B.r.cv || !B.r.cv.isConnected) { p.hunt = null; anFree(A); }
     else {
       const b = anWhere(B), how = anReach(A, a, b, B), seen = anSees(E, a, b), side = b.x >= a.x ? 1 : -1;
-      if (!how || !seen || H.t > H.T) { p.hunt = null; anFree(A); p.full = Math.max(p.full, H.eat ? 10 : 6); if (how === '' && seen) anLook(A, side, 2); }
+      if (!how || !seen || H.t > H.T) { p.hunt = null; anFree(A); p.full = Math.max(p.full, H.eat ? 10 : 6); if (how === '' && seen) anLook(A, side, 2); else if (H.eat && H.t > 2 && anDrive(A, 'wdo', null, 0, 4)) { A.s.rx.say = 'หอบ พักเหนื่อย'; A.s.rx.wk = 'rest'; const i = dA.loop.findIndex((x) => x[0] === 'rest' || x[0] === 'sit'); if (i >= 0) A.s.act = dA.loop[i][0]; } }
       else {
         const nose = side > 0 ? a.x1 : a.x0, touch = (side > 0 ? nose >= b.x0 - 4 : nose <= b.x1 + 4) && a.bot >= b.top - 4 && a.top <= b.bot + 4;
         if (touch && H.eat) {
@@ -996,7 +1021,7 @@ function anSocial(id, dt, E) {
     if (dist < a.w * 0.8 && sameLine) { anLook(A, side, 1); p.calm = 4; } /* anything else close by: has a look */
   }
   /* nothing going on: now and then something it likes to do, its own kind of thing, with what is on the page */
-  if (!anBusy(A) && !p.hunt && !p.calm && !(p.hold > 0) && !p.leap) anWish(A, a, dt, E);
+  if (!anBusy(A) && !p.hunt && !p.calm && !(p.hold > 0) && !p.leap && !(p.alertT > 0)) anWish(A, a, dt, E);
 }
 /* what each likes to do when nothing is going on (more of a word, more often):
    perch  up onto something higher near by (a box, a line above) and sit there: cats, monkeys, birds, geckos, goats
@@ -1008,7 +1033,7 @@ function anSocial(id, dt, E) {
    rest  sit or lie down for a while: big cats, bears, pandas, hippos
    patrol  walk a long way one way, round its ground: tigers, cats */
 const AN_WISH = {
-  cat: 'perch perch rest sniff explore patrol', tiger: 'patrol patrol rest', lion: 'rest rest group', dog: 'sniff sniff group explore', monkey: 'perch explore explore group', orangutan: 'perch rest',
+  cat: 'perch perch rest sniff explore patrol', tiger: 'patrol patrol rest', lion: 'rest rest group', dog: 'sniff sniff group explore', monkey: 'perch explore explore group sniff patrol', orangutan: 'perch rest',
   gecko: 'perch explore bask', houselizard: 'perch explore', gardenlizard: 'bask perch', spider: 'perch bask', goat: 'perch explore group', kangaroo: 'explore group', frog: 'explore bask',
   ricefrog: 'explore bask', toad: 'bask', grasshopper: 'explore explore', rat: 'edge sniff explore', cockroach: 'edge edge', crab: 'edge', bird: 'perch explore', parrot: 'perch perch',
   chicken: 'sniff group', duck: 'group', pig: 'sniff sniff rest', bear: 'sniff rest', anteater: 'sniff', pangolin: 'sniff edge', echidna: 'sniff', cow: 'group rest', buffalo: 'group rest',
@@ -1020,6 +1045,22 @@ const AN_WSAY = { perch: 'ขึ้นไปนั่งบนที่สูง
 const AN_WSAY1 = { bird: { perch: 'บินขึ้นไปเกาะที่สูง' }, parrot: { perch: 'บินขึ้นไปเกาะที่สูง' }, owl: { perch: 'บินขึ้นไปเกาะที่สูง' }, monkey: { perch: 'ปีนขึ้นที่สูง', explore: 'ห้อยโหนไปสำรวจ' },
   lion: { group: 'ไปนอนรวมฝูง', rest: 'นอนพักใต้ร่มไม้' }, crocodile: { bask: 'นอนอ้าปากผึ่งแดด' }, turtle: { bask: 'ยืดคอผึ่งแดด' }, penguin: { group: 'ไปยืนเบียดรวมฝูง' }, dog: { sniff: 'ดมกลิ่นไปทั่ว' },
   pig: { sniff: 'ใช้จมูกดุนหาอาหาร' }, rat: { edge: 'วิ่งเลาะชิดขอบ' }, cockroach: { edge: 'วิ่งไปหลบตามขอบ' }, goat: { perch: 'ปีนขึ้นที่สูง' }, cat: { perch: 'กระโดดขึ้นไปนั่งบนที่สูง' } };
+/* everything it may do when nothing is going on: what it is known to like (AN_WISH), its own doings from its day (not
+   walking or flying about), and what its build and its ways allow: a flyer goes off to another line, a climber or a good
+   jumper goes up, a herd animal joins the others, one that keeps its ground walks round it, a big one lies down */
+const AN_WL = new Map();
+function anWishes(D) {
+  if (AN_WL.has(D.id)) return AN_WL.get(D.id);
+  const o = (AN_WISH[D.id] || '').split(' ').filter(Boolean);
+  for (const [a] of D.loop) if (['go', 'run', 'fly', 'land', 'hang', 'look'].indexOf(a) < 0 && o.indexOf('act:' + a) < 0) o.push('act:' + a, 'act:' + a);
+  if (anFlies(D) && o.indexOf('tour') < 0) o.push('tour', 'tour');
+  if ((AN_UP[D.id] || 0) >= 0.6 && o.indexOf('perch') < 0) o.push('perch');
+  if (AN_HERD.indexOf(D.id) >= 0 && o.indexOf('group') < 0) o.push('group');
+  if (AN_TERR.indexOf(D.id) >= 0 && o.indexOf('patrol') < 0) o.push('patrol');
+  if (anSz(D) >= 4 && !anFlies(D) && D.go !== 'swim' && o.indexOf('rest') < 0) o.push('rest');
+  if (!o.length) o.push('patrol');
+  AN_WL.set(D.id, o); return o;
+}
 function anWish(A, a, dt, E) {
   const p = A.pg, D = A.D, s = A.s, w = p.wish;
   if (w) {
@@ -1036,7 +1077,7 @@ function anWish(A, a, dt, E) {
   if (p.after) { const f = p.after; p.after = null; if (anDrive(A, 'wdo', null, 0, f.T)) { s.rx.say = AN_WSAY[f.k]; s.rx.wk = f.k; } return; }
   p.wishT = (p.wishT == null ? 4 + anRng(s) * 6 : p.wishT) - dt; if (p.wishT > 0) return;
   p.wishT = 7 + anRng(s) * 9;
-  const list = (AN_WISH[D.id] || '').split(' ').filter(Boolean); if (!list.length) return;
+  const list = anWishes(D); if (!list.length) return;
   const k = list[Math.floor(anRng(s) * list.length)], up = (AN_UP[D.id] || (anFlies(D) ? 2.5 : 0.12)) * A.h, R = new Set();
   if (k === 'perch' || k === 'explore') {
     /* the highest thing above it that it can get up onto, close by (for explore: also back down to its own level) */
@@ -1062,6 +1103,18 @@ function anWish(A, a, dt, E) {
     let o = null; for (const [, B] of AN_PAGE) { if (B === A || B.D !== D || B.pg.gone || AN_CLK - B.t > 0.4 || Math.abs(B.pg.fy - a.g) > A.h * 0.25) continue; const d = Math.abs(B.pg.fx - a.x); if (d < A.w * 6 && d > A.w * 0.7 && (!o || d < Math.abs(o.pg.fx - a.x))) o = B; }
     if (!o) return; p.wish = { k, x: o.pg.fx - Math.sign(o.pg.fx - a.x) * A.w * 0.6, t: 0 }; return;
   }
+  if (k.indexOf('act:') === 0) {
+    /* one of its own doings (grazing, preening, calling, digging, the peacock's fan), for a good while */
+    const nm = k.slice(4), i = D.loop.findIndex((x) => x[0] === nm); if (i < 0) return; s.si = i; s.aT = 0; s.act = nm; s.tg = null; s.durK = 1.3 + anRng(s) * 0.8; return;
+  }
+  if (k === 'tour') {
+    /* a flyer goes off to another line or a box top, above or below, and comes down there */
+    const opts = []; for (let i = -6; i <= 6; i++) { if (!i) continue; const xx = a.x + i * A.w * 0.6; if (xx < A.w * 0.4 || xx > W - A.w * 0.4) continue; const sp = anSupport(anEnvNear(E, xx - 1, xx + 1, R), xx, a.g - A.h * 4, a.g + A.h * 3); if (sp && Math.abs(sp[0] - a.g) > A.h * 0.3) opts.push([xx, sp[0]]); }
+    if (!opts.length) return; const o = opts[Math.floor(anRng(s) * opts.length)];
+    if (o[1] > a.g) p.floor = o[1]; /* lower down: that is where it lives now */
+    if (anDrive(A, 'wgo', anGoal(A, a, o[0], o[1] - A.h * 0.4).slice(0, 2).concat([Math.max(0.15, (a.g - o[1]) / A.k + 0.2)]), (D.fast || D.spd * 2) * 0.8, 4)) { s.rx.say = 'บินไปเกาะที่อื่น'; s.rx.wk = 'tour'; }
+    return;
+  }
   if (k === 'patrol') { const d = anRng(s) < 0.5 ? -1 : 1; p.wish = { k, x: Math.max(A.w * 0.4, Math.min(W - A.w * 0.4, a.x + d * A.w * 4)), t: 0 }; return; }
   if (k === 'bask' || k === 'rest') {
     if (k === 'rest') { const i = D.loop.findIndex((x) => x[0] === 'rest' || x[0] === 'sit'); if (i >= 0) { s.si = i; s.aT = 0; s.act = D.loop[i][0]; s.tg = null; return; } }
@@ -1084,7 +1137,7 @@ function anActors() {
   AN_ACT = { t: now, list: out, prev: AN_ACT.prev }; return out;
 }
 /* the body of an animal on the page, for the drawn pictures that walk (they stop at it, not at its empty box) */
-function anVis(id) { const A = AN_PAGE.get(id); if (!A || A.pg.gone || AN_CLK - A.t > 0.4) return null; const a = anWhere(A); return [a.x0, a.top, a.x1, a.g]; }
+function anVis(id) { const A = AN_PAGE.get(id); if (!A || A.pg.gone || AN_CLK - A.t > 0.4) return null; const a = anWhere(A); return [a.x0, a.top, a.x1, a.g, A.pg.vx || 0]; }
 
 /* ----- birds (chicken, duck, sparrow): body, neck and head that peck, legs with the ankle bent back, wings folded
    on the sides or spread and beating when it flies or flutters away ----- */
