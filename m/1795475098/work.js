@@ -38,8 +38,8 @@ function hwRemember(list) {
   hwEntryShow();
 }
 function hwReceipts() { return hwLS('tp-hwrc', {}); }
-function hwReceiptAdd(aid, sid) {
-  const r = hwReceipts(); (r[aid] = r[aid] || []).push({ s: sid, at: now() }); r[aid] = r[aid].slice(-10); store_ls.set('tp-hwrc', JSON.stringify(r));
+function hwReceiptAdd(aid, sid, who) {
+  const r = hwReceipts(); (r[aid] = r[aid] || []).push(who && who.sid != null ? { s: sid, at: now(), w: String(who.sid).toLowerCase() } : { s: sid, at: now() }); r[aid] = r[aid].slice(-10); store_ls.set('tp-hwrc', JSON.stringify(r));
   const sent = hwLS('tp-sent', []); if (!sent.includes(aid)) { sent.push(aid); store_ls.set('tp-sent', JSON.stringify(sent.slice(-300))); }
   hwEntryShow();
 }
@@ -47,7 +47,13 @@ function hwReceiptAdd(aid, sid) {
 function hwIdents() { const out = []; try { for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k && k.indexOf('tp-ident-') === 0) { const v = hwLS(k, null); if (v && v.sid) out.push({ cls: k.slice(9), who: v }); } } } catch (e) { /* storage blocked */ } return out; }
 /* what the cloud says this learner has handed in: by class and ID, and by the receipts kept on this device */
 async function hwMine(sb, idents) {
-  const rc = hwReceipts(), ids = [].concat(...Object.values(rc).map((l) => l.map((x) => x.s))).slice(-300), got = {}, acks = {};
+  /* one iPad is shared by a class: a receipt of work set to a class this learner is confirmed in may be another learner's,
+     so that class is asked by this learner's ID alone; receipts answer only for work no ID can find (no class, or a class
+     not confirmed on this device). Offline, a receipt counts for a confirmed class only when it names this learner */
+  const rc = hwReceipts(), clsOf = {}; for (const k of hwLS('tp-myhw', [])) if (k && k.id) clsOf[k.id] = k.cls || null;
+  const mineIn = {}; for (const it of idents) if (it.cls && it.who && it.who.sid != null) mineIn[it.cls] = String(it.who.sid).toLowerCase();
+  const byMe = (aid, x) => { const c = clsOf[aid]; return !c || mineIn[c] == null ? true : x.w === mineIn[c]; };
+  const ids = [].concat(...Object.entries(rc).map(([aid, l]) => (clsOf[aid] && mineIn[clsOf[aid]] != null ? [] : l.map((x) => x.s)))).slice(-300), got = {}, acks = {};
   const add = (aid, at) => { const g = got[aid] || (got[aid] = { n: 0, last: 0 }); g.n++; g.last = Math.max(g.last, Date.parse(at) || +at || 0); };
   let cloud = false;
   try {
@@ -57,7 +63,7 @@ async function hwMine(sb, idents) {
       if (ids.length) ids.length = 0; /* the receipts are asked once */
     }
   } catch (e) { cloud = false; }
-  if (!cloud) { for (const [aid, l] of Object.entries(rc)) for (const x of l) add(aid, x.at); for (const aid of hwLS('tp-sent', [])) if (!got[aid]) got[aid] = { n: 1, last: 0 }; }
+  if (!cloud) { for (const [aid, l] of Object.entries(rc)) for (const x of l) if (byMe(aid, x)) add(aid, x.at); for (const aid of hwLS('tp-sent', [])) if (!got[aid] && !(clsOf[aid] && mineIn[clsOf[aid]] != null)) got[aid] = { n: 1, last: 0 }; }
   return { got, cloud, acks };
 }
 async function hwFetchOne(sb, id) {
@@ -69,6 +75,22 @@ async function hwFetchClass(sb, cls) {
   const r = await sb.rpc('hw_class', { p_cls: cls });
   if (!r.error) return r;
   return sb.from('assignments').select('id,title,data,due,open,created_at').eq('data->>clsId', cls).order('created_at', { ascending: true });
+}
+/* homework set while no room is open (fix 23 Nov 2026): the work of the classes this device knows, asked from the cloud and
+   kept like work from the room, so the learner sees it on the "my work" button without the teacher opening the room; work
+   handed in from another device is marked from the cloud by this learner's ID; new open work is told once */
+async function hwPollRun(classes) {
+  let sb; try { sb = await cloudClient(); } catch (e) { return false; }
+  const before = new Set(hwLS('tp-myhw', []).map((x) => x && x.id)), list = []; let any = false;
+  for (const c of classes) { const { data, error } = await hwFetchClass(sb, c).catch((e) => ({ data: null, error: e })); if (error) continue; any = true; for (const a of data || []) if (a && a.id && !(a.data && a.data.kind === 'grades') && a.open !== false) list.push(a); }
+  if (!any) return false;
+  hwRemember(list.map((a) => ({ id: a.id, title: a.title, due: a.due, cls: a.data && a.data.clsId })));
+  const idents = hwIdents().filter((x) => classes.includes(x.cls));
+  if (idents.length) { const mine = await hwMine(sb, idents).catch(() => ({ cloud: false })); if (mine.cloud) { const sent = hwLS('tp-sent', []); for (const aid of Object.keys(mine.got)) if (!sent.includes(aid)) sent.push(aid); store_ls.set('tp-sent', JSON.stringify(sent.slice(-300))); hwEntryShow(); } }
+  const sent = hwLS('tp-sent', []), fresh = list.filter((a) => !before.has(a.id) && !sent.includes(a.id) && hwState(a, null).ok);
+  /* the line breaks only between these phrases, never inside the name of the button */
+  if (fresh.length && isStudentSide() && $('#hwStudent').hidden) { const w = ['ครูมอบหมายการบ้านใหม่', fresh.length + ' งาน', 'ดูได้ที่ปุ่ม', 'งานของฉัน']; toast(w.join(' '), 6000); $('#toast').innerHTML = w.map((x) => '<span style="white-space:nowrap">' + esc(x) + '</span>').join(' '); }
+  return true;
 }
 /* the overlay shared by the learner's pages; inside the app it closes back to the notebook */
 function hwOverlay(title) {
@@ -87,7 +109,7 @@ async function hwHubOpen(clsId) {
   $('#loading').hidden = true;
   const { b, top } = hwOverlay(clsId ? 'งานทั้งเทอม' : 'งานของฉัน'); const host = exEl('div', ''); b.appendChild(host); waitLine(host, 'กำลังโหลดงาน');
   const known = hwLS('tp-myhw', []), idents = hwIdents();
-  const classes = [...new Set([clsId].concat(idents.map((x) => x.cls), known.map((x) => x.cls)).filter(Boolean))].filter((c) => !clsId || c === clsId);
+  const classes = [...new Set([clsId].concat(idents.map((x) => x.cls), known.map((x) => x.cls), hwLS('tp-mycls', [])).filter((c) => typeof c === 'string' && c))].filter((c) => !clsId || c === clsId);
   const list = new Map(); let failed = false;
   for (const c of classes) { const { data, error } = await hwFetchClass(sb, c); if (error) { failed = true; continue; } for (const a of data || []) if (!(a.data && a.data.kind === 'grades')) list.set(a.id, a); }
   if (!clsId) for (const k of known.filter((x) => !x.cls || !classes.includes(x.cls)).slice(-40)) { if (list.has(k.id)) continue; const { data } = await hwFetchOne(sb, k.id).catch(() => ({ data: null })); if (data) list.set(data.id, data); }
@@ -294,7 +316,7 @@ async function hwStudentOpen(id, termCls, opt) {
       if (part) { row.data.part = view.map((q) => q.id); const ans = {}; for (const q of view) if (st.answers[q.id]) ans[q.id] = st.answers[q.id]; row.data.answers = ans; } /* only the added questions: the teacher lays them over the earlier hand-in */
       if (eon && (A.chg || []).length) row.data.ack = A.chg.map((c) => c.id); /* handing in after the change has been shown counts as having read it */
       const { error: ie } = await sb.from('submissions').insert(row); if (ie) throw ie;
-      W8.stop(); hwReceiptAdd(a.id, sid); store_ls.del(dkey); if (row.data.ack) hweSeenAdd(a.id, row.data.ack, stu);
+      W8.stop(); hwReceiptAdd(a.id, sid, stu); store_ls.del(dkey); if (row.data.ack) hweSeenAdd(a.id, row.data.ack, stu);
       for (const l of Object.values(st.att)) for (const x of l) if (x.url) URL.revokeObjectURL(x.url);
       hwDoneCard(sb, a, sid, name, paths.length, st, stu, termCls);
     } catch (e) { W8.stop(); go.disabled = false; res.innerHTML = '<div class="note err">' + esc(e && /หน้าสมุด/.test(e.message || '') ? e.message : hwErrText(e)) + '</div>'; }
