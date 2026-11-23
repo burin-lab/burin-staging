@@ -38,8 +38,8 @@ function hwRemember(list) {
   hwEntryShow();
 }
 function hwReceipts() { return hwLS('tp-hwrc', {}); }
-function hwReceiptAdd(aid, sid) {
-  const r = hwReceipts(); (r[aid] = r[aid] || []).push({ s: sid, at: now() }); r[aid] = r[aid].slice(-10); store_ls.set('tp-hwrc', JSON.stringify(r));
+function hwReceiptAdd(aid, sid, who) {
+  const r = hwReceipts(); (r[aid] = r[aid] || []).push(who && who.sid != null ? { s: sid, at: now(), w: String(who.sid).toLowerCase() } : { s: sid, at: now() }); r[aid] = r[aid].slice(-10); store_ls.set('tp-hwrc', JSON.stringify(r));
   const sent = hwLS('tp-sent', []); if (!sent.includes(aid)) { sent.push(aid); store_ls.set('tp-sent', JSON.stringify(sent.slice(-300))); }
   hwEntryShow();
 }
@@ -47,7 +47,13 @@ function hwReceiptAdd(aid, sid) {
 function hwIdents() { const out = []; try { for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k && k.indexOf('tp-ident-') === 0) { const v = hwLS(k, null); if (v && v.sid) out.push({ cls: k.slice(9), who: v }); } } } catch (e) { /* storage blocked */ } return out; }
 /* what the cloud says this learner has handed in: by class and ID, and by the receipts kept on this device */
 async function hwMine(sb, idents) {
-  const rc = hwReceipts(), ids = [].concat(...Object.values(rc).map((l) => l.map((x) => x.s))).slice(-300), got = {}, acks = {};
+  /* one iPad is shared by a class: a receipt of work set to a class this learner is confirmed in may be another learner's,
+     so that class is asked by this learner's ID alone; receipts answer only for work no ID can find (no class, or a class
+     not confirmed on this device). Offline, a receipt counts for a confirmed class only when it names this learner */
+  const rc = hwReceipts(), clsOf = {}; for (const k of hwLS('tp-myhw', [])) if (k && k.id) clsOf[k.id] = k.cls || null;
+  const mineIn = {}; for (const it of idents) if (it.cls && it.who && it.who.sid != null) mineIn[it.cls] = String(it.who.sid).toLowerCase();
+  const byMe = (aid, x) => { const c = clsOf[aid]; return !c || mineIn[c] == null ? true : x.w === mineIn[c]; };
+  const ids = [].concat(...Object.entries(rc).map(([aid, l]) => (clsOf[aid] && mineIn[clsOf[aid]] != null ? [] : l.map((x) => x.s)))).slice(-300), got = {}, acks = {};
   const add = (aid, at) => { const g = got[aid] || (got[aid] = { n: 0, last: 0 }); g.n++; g.last = Math.max(g.last, Date.parse(at) || +at || 0); };
   let cloud = false;
   try {
@@ -57,7 +63,7 @@ async function hwMine(sb, idents) {
       if (ids.length) ids.length = 0; /* the receipts are asked once */
     }
   } catch (e) { cloud = false; }
-  if (!cloud) { for (const [aid, l] of Object.entries(rc)) for (const x of l) add(aid, x.at); for (const aid of hwLS('tp-sent', [])) if (!got[aid]) got[aid] = { n: 1, last: 0 }; }
+  if (!cloud) { for (const [aid, l] of Object.entries(rc)) for (const x of l) if (byMe(aid, x)) add(aid, x.at); for (const aid of hwLS('tp-sent', [])) if (!got[aid] && !(clsOf[aid] && mineIn[clsOf[aid]] != null)) got[aid] = { n: 1, last: 0 }; }
   return { got, cloud, acks };
 }
 async function hwFetchOne(sb, id) {
@@ -294,7 +300,7 @@ async function hwStudentOpen(id, termCls, opt) {
       if (part) { row.data.part = view.map((q) => q.id); const ans = {}; for (const q of view) if (st.answers[q.id]) ans[q.id] = st.answers[q.id]; row.data.answers = ans; } /* only the added questions: the teacher lays them over the earlier hand-in */
       if (eon && (A.chg || []).length) row.data.ack = A.chg.map((c) => c.id); /* handing in after the change has been shown counts as having read it */
       const { error: ie } = await sb.from('submissions').insert(row); if (ie) throw ie;
-      W8.stop(); hwReceiptAdd(a.id, sid); store_ls.del(dkey); if (row.data.ack) hweSeenAdd(a.id, row.data.ack, stu);
+      W8.stop(); hwReceiptAdd(a.id, sid, stu); store_ls.del(dkey); if (row.data.ack) hweSeenAdd(a.id, row.data.ack, stu);
       for (const l of Object.values(st.att)) for (const x of l) if (x.url) URL.revokeObjectURL(x.url);
       hwDoneCard(sb, a, sid, name, paths.length, st, stu, termCls);
     } catch (e) { W8.stop(); go.disabled = false; res.innerHTML = '<div class="note err">' + esc(e && /หน้าสมุด/.test(e.message || '') ? e.message : hwErrText(e)) + '</div>'; }
@@ -521,7 +527,7 @@ async function hwBoard(body) {
   const ms = mselBar(body, { sel, all: () => shown().map((a) => a.id), redraw: () => draw(), noun: 'งาน', actions: [
     ['ปิดรับ', async (ids) => { await hwBulk(ids, (a) => ({ open: false })); }],
     ['เปิดรับอีกครั้ง', async (ids) => { await hwBulk(ids, (a) => ({ open: true })); }],
-    ['ขยายเวลาทั้งห้อง', (ids, el) => hwExtPick(el, 'ขยายเวลาให้ทั้งห้อง ' + ids.length + ' งาน', async (t) => { await hwBulk(ids, (a) => ({ open: true, data: Object.assign({}, a.data, { ext: Object.assign({}, a.data.ext || {}, { all: new Date(t).toISOString() }) }) })); })],
+    ['ขยายเวลาทั้งห้อง', (ids, el) => hwExtPick(el, 'ขยายเวลาให้ทั้งห้อง ' + ids.length + ' งาน', async (t) => { await hwBulk(ids, (a) => { const d = Object.assign({}, a.data, { ext: Object.assign({}, a.data.ext || {}, { all: new Date(t).toISOString() }) }); if (hweOn()) { const c = { id: 'g' + uid().slice(0, 8), at: now(), kind: 'ext', ext: t }; c.text = hweChgText(c, d); d.chg = (d.chg || []).concat([c]).slice(-30); } return { open: true, data: d }; }); })], /* learners are told, as from the edit panel (task 2.9) */
     ['ย้ายไปห้อง', (ids, el) => { if (!CLS.list.length) { toast('ยังไม่มีห้องเรียน สร้างห้องได้ที่แท็บห้องและสมุดคะแนน', 2400); return; } popMenu(el, 'ย้าย ' + ids.length + ' งานไปห้อง', CLS.list.map((c) => [classLabel(c), async () => { let bad = 0; for (const id of ids) { const a = list.find((x) => x.id === id); if (a && !(await hwEditSave(a, a.title, c.id, true))) bad++; } toast(bad ? 'ย้ายไม่สำเร็จ ' + bad + ' งาน' : 'ย้ายไป ' + classLabel(c) + ' แล้ว', 2000); HWX.sel = null; HWX.cls = c.id; HW.list = null; exRender(); }]).concat([['ไม่ผูกห้อง', async () => { for (const id of ids) { const a = list.find((x) => x.id === id); if (a) await hwEditSave(a, a.title, '', true); } HWX.sel = null; HWX.cls = ''; HW.list = null; exRender(); }]])); }],
     ['ลบ', (ids, el) => popMenu(el, 'ลบ ' + ids.length + ' งาน พร้อมงานที่ผู้เรียนส่ง ย้อนกลับไม่ได้', [['ลบเลย', async () => { await hwDelete(ids); }]]), true]
   ] });
@@ -826,6 +832,8 @@ function hweBanner(a, unread, o) {
 async function hweOpen(a) {
   if (!hweOn()) return hwEditOpen(a);
   if (!CLS.loaded) await clsLoad();
+  /* the work as the cloud has it now: another device of the teacher may have changed it since the list was drawn */
+  try { const { data: f } = await CLOUD.client.from('assignments').select('id,title,data,due,open,created_at').eq('id', a.id).maybeSingle(); if (f) Object.assign(a, f); } catch (e) { /* the copy in the list */ }
   const A = a.data || {}, old = a.due ? Date.parse(a.due) : null, c0 = A.clsId && CLS.list.find((x) => x.id === A.clsId);
   const st = { add: [], extAll: undefined, stu: new Set() };
   let nSent = null; try { nSent = (await hwLoadSubs(a.id)).length; } catch (e) { /* count unknown */ }
@@ -851,13 +859,14 @@ async function hweOpen(a) {
     if (!dueChanged()) { dueNote.innerHTML = old ? 'กำหนดส่งเดิม ' + hweNw(old) + (old < now() ? ' ผ่านไปแล้ว เลื่อนออกเพื่อเปิดรับอีกครั้ง' : '') : 'ยังไม่ได้กำหนดเวลาส่ง'; dueNote.classList.remove('err'); return; }
     if (t <= now()) { dueNote.innerHTML = 'เวลานี้ผ่านไปแล้ว เลือกเวลาหลังจากตอนนี้'; dueNote.classList.add('err'); return; }
     dueNote.classList.remove('err');
-    dueNote.innerHTML = (old && t < old ? 'เลื่อนเข้าเร็วขึ้น ' + hwLeft(old - t) : old ? 'เลื่อนออกไปอีก ' + hwLeft(t - old) : 'ตั้งกำหนดส่ง') + ' ปิดรับ ' + hweNw(t) + (nSent ? '<br>ส่งแล้ว ' + nSent + ' คน งานที่ส่งหลังกำหนดใหม่จะนับว่าส่งช้า' : '') + (old && old < now() ? '<br>เปิดรับอีกครั้งจนถึงเวลานี้' : '');
+    dueNote.innerHTML = (old && t < old ? 'เลื่อนเข้าเร็วขึ้น ' + hwLeft(old - t) : old ? 'เลื่อนออกไปอีก ' + hwLeft(t - old) : 'ตั้งกำหนดส่ง') + ' ปิดรับ ' + hweNw(t) + (nSent ? '<br>ส่งแล้ว ' + nSent + ' คน งานที่ส่งหลังกำหนดใหม่จะนับว่าส่งช้า' : '') + (old && old < now() ? '<br>เปิดรับอีกครั้งจนถึงเวลานี้' : '') + (hweExtAll() && hweExtAll() > t ? '<br>ยังขยายเวลาให้ทั้งห้องถึง ' + hweNw(hweExtAll()) + ' งานจึงยังเปิดรับถึงเวลานั้น ถ้าจะปิดเร็วขึ้นให้กด ยกเลิกการขยายทั้งห้อง' : '');
   }
+  const hweExtAll = () => { const v0 = st.extAll === undefined ? (A.ext && A.ext.all) : st.extAll; return v0 ? Date.parse(v0) : null; };
   dueIn.oninput = say; say();
   /* more time without moving the due time */
   sec('ขยายเวลา (กำหนดส่งเดิมยังใช้ตัดสินว่าส่งช้า)');
   const extRow = exEl('div', 'row2'), extNote = exEl('div', 'note small'); p.appendChild(extNote); p.appendChild(extRow);
-  const extSay = () => { const v = st.extAll === undefined ? (A.ext && A.ext.all) : st.extAll; extNote.innerHTML = v ? 'ทั้งห้องส่งได้ถึง ' + hweNw(Date.parse(v)) : 'ยังไม่ได้ขยายเวลาทั้งห้อง'; xAll.hidden = !v; };
+  const extSay = () => { say(); const v = st.extAll === undefined ? (A.ext && A.ext.all) : st.extAll; extNote.innerHTML = v ? 'ทั้งห้องส่งได้ถึง ' + hweNw(Date.parse(v)) : 'ยังไม่ได้ขยายเวลาทั้งห้อง'; xAll.hidden = !v; };
   const bAll = exEl('button', 'btn', 'ขยายเวลาทั้งห้อง'); bAll.type = 'button'; bAll.onclick = () => hwExtPick(bAll, 'ให้ทั้งห้องส่งเพิ่มได้ถึง', async (t) => { st.extAll = new Date(t).toISOString(); extSay(); });
   const xAll = exEl('button', 'btn', 'ยกเลิกการขยายทั้งห้อง'); xAll.type = 'button'; xAll.onclick = () => { st.extAll = null; extSay(); };
   extRow.append(bAll, xAll);
@@ -940,13 +949,15 @@ async function hweOpen(a) {
     const res = await hweSave(a, { title: ti.value, cls: cs.value, due: dueChanged() ? newDue() : undefined, extAll: st.extAll, stu: [...st.stu], stuT: stuIn ? Date.parse(stuIn.value) : null, add: st.add, msg: mg.value.trim() });
     ok.disabled = false; ok.removeAttribute('aria-busy');
     if (res !== true) { msg.innerHTML = '<div class="note err">' + esc(res) + '</div>'; return; }
-    box.remove(); toast('บันทึกแล้ว', 1400); if (HWX.cls !== '*' && HWX.view !== 'one') HWX.cls = cs.value; HW.list = null; exRender();
+    box.remove(); toast(HWE.note ? 'บันทึกแล้ว ' + HWE.note : 'บันทึกแล้ว', HWE.note ? 4200 : 1400); if (HWX.cls !== '*' && HWX.view !== 'one') HWX.cls = cs.value; HW.list = null; exRender();
   };
   no.onclick = () => box.remove(); box.onclick = (e) => { if (e.target === box) box.remove(); };
   r.append(ok, no); p.appendChild(r); document.body.appendChild(box); typeset(p); ti.focus();
 }
 /* write it all: the name and class as before, then the due time, the extensions, the added questions and the change for learners */
+const HWE = { note: '' };
 async function hweSave(a, v) {
+  HWE.note = '';
   if (v.stu && v.stu.length && !(isFinite(v.stuT) && v.stuT > now())) return 'เวลาที่ขยายรายคนต้องเป็นเวลาหลังจากตอนนี้';
   const oldCls = (a.data && a.data.clsId) || '';
   if (!(await hwEditSave(a, v.title, v.cls, true))) return 'บันทึกไม่สำเร็จ ตรวจอินเทอร์เน็ตแล้วลองอีกครั้ง';
@@ -961,7 +972,9 @@ async function hweSave(a, v) {
   if (extCh) A.ext = ext;
   const n0 = (A.qs || []).length;
   if (v.add && v.add.length) {
-    const qm = Object.assign({}, A.qm || {}), keys = Object.assign({}, HW.keys[a.id] || {}), model = Object.assign({}, HW.model[a.id] || {});
+    /* every question keeps the kind it has now: older work without qm reads it from A.work, which may change below */
+    const qm = {}; for (const q of A.qs || []) qm[q.id] = hwQm(A, q);
+    const keys = Object.assign({}, HW.keys[a.id] || {}), model = Object.assign({}, HW.model[a.id] || {});
     const qs = (A.qs || []).concat(v.add.map((x) => { const q = x.q, o = { id: q.id, t: q.t, ch: q.ch, q: q.q, c: q.c || [], d: q.d, fig: q.fig }; qm[q.id] = x.m; if (q.c && q.c.length >= 2) { keys[q.id] = q.a || 0; if (A.instant && x.m === 'mc') { o.a = q.a || 0; o.e = q.e || ''; } } const mm = [q.ans, q.e].filter(Boolean).join('\n'); if (mm) model[q.id] = mm.slice(0, 1500); return o; }));
     A.qs = qs; A.qm = qm; if (v.add.some((x) => x.m === 'work')) { A.work = true; if (!A.wt) A.wt = 0.5; }
     chg.add = v.add.map((x) => x.q.id); kinds.push('add');
@@ -980,7 +993,12 @@ async function hweSave(a, v) {
   for (const k of CLS.list) {
     const it = (k.items || []).find((x) => x.ref === a.id); if (!it) continue; let ch = false;
     if (patch.due) { it.due = patch.due; ch = true; }
-    if (v.add && v.add.length && +it.max === n0) { it.max = (A.qs || []).length; ch = true; }
+    if (v.add && v.add.length && +it.max === n0) {
+      /* scores the teacher typed in were out of the old full marks: those stay, and so does the full mark */
+      const typed = Object.values((k.scores && k.scores[it.id]) || {}).filter((x) => !(x && typeof x === 'object' && x.auto)).length;
+      if (typed) HWE.note = 'คะแนนเต็มในสมุดคะแนนยังเป็น ' + it.max + ' เพราะมีคะแนนที่ครูกรอกเอง ' + typed + ' คน แก้คะแนนเต็มเองได้ที่สมุดคะแนน';
+      else { it.max = (A.qs || []).length; ch = true; }
+    }
     if (ch) await clsSave(k);
   }
   return true;
