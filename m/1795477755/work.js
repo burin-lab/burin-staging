@@ -76,6 +76,22 @@ async function hwFetchClass(sb, cls) {
   if (!r.error) return r;
   return sb.from('assignments').select('id,title,data,due,open,created_at').eq('data->>clsId', cls).order('created_at', { ascending: true });
 }
+/* homework set while no room is open (fix 23 Nov 2026): the work of the classes this device knows, asked from the cloud and
+   kept like work from the room, so the learner sees it on the "my work" button without the teacher opening the room; work
+   handed in from another device is marked from the cloud by this learner's ID; new open work is told once */
+async function hwPollRun(classes) {
+  let sb; try { sb = await cloudClient(); } catch (e) { return false; }
+  const before = new Set(hwLS('tp-myhw', []).map((x) => x && x.id)), list = []; let any = false;
+  for (const c of classes) { const { data, error } = await hwFetchClass(sb, c).catch((e) => ({ data: null, error: e })); if (error) continue; any = true; for (const a of data || []) if (a && a.id && !(a.data && a.data.kind === 'grades') && a.open !== false) list.push(a); }
+  if (!any) return false;
+  hwRemember(list.map((a) => ({ id: a.id, title: a.title, due: a.due, cls: a.data && a.data.clsId })));
+  const idents = hwIdents().filter((x) => classes.includes(x.cls));
+  if (idents.length) { const mine = await hwMine(sb, idents).catch(() => ({ cloud: false })); if (mine.cloud) { const sent = hwLS('tp-sent', []); for (const aid of Object.keys(mine.got)) if (!sent.includes(aid)) sent.push(aid); store_ls.set('tp-sent', JSON.stringify(sent.slice(-300))); hwEntryShow(); } }
+  const sent = hwLS('tp-sent', []), fresh = list.filter((a) => !before.has(a.id) && !sent.includes(a.id) && hwState(a, null).ok);
+  /* the line breaks only between these phrases, never inside the name of the button */
+  if (fresh.length && isStudentSide() && $('#hwStudent').hidden) { const w = ['ครูมอบหมายการบ้านใหม่', fresh.length + ' งาน', 'ดูได้ที่ปุ่ม', 'งานของฉัน']; toast(w.join(' '), 6000); $('#toast').innerHTML = w.map((x) => '<span style="white-space:nowrap">' + esc(x) + '</span>').join(' '); }
+  return true;
+}
 /* the overlay shared by the learner's pages; inside the app it closes back to the notebook */
 function hwOverlay(title) {
   const box = $('#hwStudent'); box.hidden = false; $('#hwsTitle').textContent = title;
@@ -93,7 +109,7 @@ async function hwHubOpen(clsId) {
   $('#loading').hidden = true;
   const { b, top } = hwOverlay(clsId ? 'งานทั้งเทอม' : 'งานของฉัน'); const host = exEl('div', ''); b.appendChild(host); waitLine(host, 'กำลังโหลดงาน');
   const known = hwLS('tp-myhw', []), idents = hwIdents();
-  const classes = [...new Set([clsId].concat(idents.map((x) => x.cls), known.map((x) => x.cls)).filter(Boolean))].filter((c) => !clsId || c === clsId);
+  const classes = [...new Set([clsId].concat(idents.map((x) => x.cls), known.map((x) => x.cls), hwLS('tp-mycls', [])).filter((c) => typeof c === 'string' && c))].filter((c) => !clsId || c === clsId);
   const list = new Map(); let failed = false;
   for (const c of classes) { const { data, error } = await hwFetchClass(sb, c); if (error) { failed = true; continue; } for (const a of data || []) if (!(a.data && a.data.kind === 'grades')) list.set(a.id, a); }
   if (!clsId) for (const k of known.filter((x) => !x.cls || !classes.includes(x.cls)).slice(-40)) { if (list.has(k.id)) continue; const { data } = await hwFetchOne(sb, k.id).catch(() => ({ data: null })); if (data) list.set(data.id, data); }
