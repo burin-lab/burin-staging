@@ -547,7 +547,7 @@ function anTap(sp, r, x, y, w, h) {
 const AN_PAGE = new Map();
 let AN_CLK = 0;
 let AN_ENV = null;
-function anPageOn(sp) { return !!(sp && sp.clean && !sp.stay && !sp.thumb && (typeof flagOn !== 'function' || flagOn('onpage'))); }
+function anPageOn(sp) { return !!(sp && sp.clean && !sp.stay && !sp.thumb && (typeof flagOn !== 'function' || flagOn('onpage')) && (typeof planOn !== 'function' || planOn('onpage'))); }
 /* everything on the page an animal can stand on or bump into, as segments; built again at most twice a second, and only
    when the lines or the boxes changed */
 function anEnvSig() {
@@ -576,7 +576,7 @@ function anEnv(dt) {
   const R = [];
   for (const it of visibleItems()) {
     if (AN_PAGE.has(it.id) || isBgItem(it) || it.type === 'life' || (it.spec && (it.spec.bare || it.spec.clean))) continue;
-    if (it.type === 'scene' && it.fr === 0 && it.spec && it.spec.domain === 'phys' && it.spec.dim !== 3 && (typeof flagOn !== 'function' || flagOn('pagemove'))) continue; /* a frameless model out on the paper: its bodies are met (anActors), not its box */
+    if (it.type === 'scene' && it.fr === 0 && it.spec && it.spec.domain === 'phys' && it.spec.dim !== 3 && (typeof flagOn !== 'function' || flagOn('pagemove')) && (typeof planOn !== 'function' || planOn('pagemove'))) continue; /* a frameless model out on the paper: its bodies are met (anActors), not its box */
     const el = itemsEl.querySelector('[data-id="' + it.id + '"]'); if (!el || el.hidden || !el.offsetHeight) continue;
     const b = !it.type || it.type === 'text' ? tightItemBox(it) : itemBox(it); if (b[2] - b[0] < 4 || b[3] - b[1] < 4) continue;
     R.push({ id: it.id, b, seg: [[b[0], b[1], b[2], b[1]], [b[0], b[1], b[0], b[3]], [b[2], b[1], b[2], b[3]]] });
