@@ -83,12 +83,13 @@ async function hwPollRun(classes) {
   let sb; try { sb = await cloudClient(); } catch (e) { return false; }
   const before = new Set(hwLS('tp-myhw', []).map((x) => x && x.id)), list = []; let any = false;
   for (const c of classes) { const { data, error } = await hwFetchClass(sb, c).catch((e) => ({ data: null, error: e })); if (error) continue; any = true; for (const a of data || []) if (a && a.id && !(a.data && a.data.kind === 'grades') && a.open !== false) { if (hwHidden(a)) { const t = hwShowAt(a); if (t !== Infinity && t - now() < HWP_EVERY) { clearTimeout(HWP.T); HWP.T = setTimeout(() => hwPoll(true), t - now() + 1500); } continue; } list.push(a); } }
-  if (!any) return false;
+  if (!any) { hwDueRemind(); return false; }
   hwRemember(list.map((a) => ({ id: a.id, title: a.title, due: a.due, cls: a.data && a.data.clsId })));
   const idents = hwIdents().filter((x) => classes.includes(x.cls));
   if (idents.length) { const mine = await hwMine(sb, idents).catch(() => ({ cloud: false })); if (mine.cloud) { const sent = hwLS('tp-sent', []); for (const aid of Object.keys(mine.got)) if (!sent.includes(aid)) sent.push(aid); store_ls.set('tp-sent', JSON.stringify(sent.slice(-300))); hwEntryShow(); } }
   const sent = hwLS('tp-sent', []), fresh = list.filter((a) => !before.has(a.id) && !sent.includes(a.id) && hwState(a, null).ok);
   /* the line breaks only between these phrases, never inside the name of the button */
+  hwDueRemind();
   if (fresh.length && isStudentSide() && $('#hwStudent').hidden) { const w = ['ครูมอบหมายการบ้านใหม่', fresh.length + ' งาน', 'ดูได้ที่ปุ่ม', 'งานของฉัน']; toast(w.join(' '), 6000); $('#toast').innerHTML = w.map((x) => '<span style="white-space:nowrap">' + esc(x) + '</span>').join(' '); }
   return true;
 }
@@ -170,7 +171,7 @@ async function hwHubOpen(clsId) {
       el.querySelector('b').textContent = a.title;
       el.querySelector('small').textContent = [nq + ' ข้อ' + (nw ? ' แสดงวิธีทำ ' + nw + ' ข้อ' : ''), s.due ? 'ส่งภายใน ' + hwWhen(s.due) : ''].filter(Boolean).join(' : ');
       const open = () => { location.hash = 'hw=' + a.id; hwStudentOpen(a.id, clsId); };
-      if (s.ok || r.sent || r.more) { const go = exEl('button', 'btn' + (!r.sent && s.ok ? ' solid' : ''), r.more ? 'ส่งข้อที่เพิ่ม' : r.sent ? (s.ok ? 'ดูหรือส่งใหม่' : 'ดูงาน') : 'ทำงานนี้'); go.type = 'button'; go.onclick = open; el.appendChild(go); }
+      if (s.ok || r.sent || r.more) { const go = exEl('button', 'btn' + (!r.sent && s.ok ? ' solid' : ''), r.more ? 'ส่งข้อที่เพิ่ม' : r.sent ? (s.ok ? (hweSentCopyOn() ? 'แก้ไขการส่ง' : 'ดูหรือส่งใหม่') : 'ดูงาน') : 'ทำงานนี้'); go.type = 'button'; go.onclick = open; el.appendChild(go); }
       if (r.unread.length) { el.classList.add('chg'); const who = A.cls && A.cls.map ? savedIdent(A.cls.id) : null; el.appendChild(hweBanner(a, r.unread, { compact: true, sb, who, ok: s.ok, open: (A.cls && A.cls.map && !who) || (!who && !store_ls.get('tp-sname')) ? open : null, done: () => { r.unread = []; } })); }
       listEl.appendChild(el);
     }
@@ -181,6 +182,10 @@ async function hwHubOpen(clsId) {
   view();
 }
 
+/* editing a hand-in (owner's request 25 Nov 2026, off with "hwresend"): the button of work handed in says so, and the
+   answers sent from this device by the same learner (tp-hws-<work>: who, answers, notebook pages, how many other files)
+   come back in the form. Photos and files are not kept on the device, so they are attached again */
+const hweSentCopyOn = () => flagOn('hwresend');
 /* ---------- learner: one piece of work ---------- */
 async function hwStudentOpen(id, termCls, opt) {
   let sb; try { sb = await cloudClient(); } catch (e) { toast('เชื่อมต่อไม่ได้', 3000); return; }
@@ -216,9 +221,16 @@ async function hwStudentOpen(id, termCls, opt) {
   }
   if (!A.online && !A.files && A.ver !== 2) { b.appendChild(exEl('div', 'note', 'งานนี้ทำใส่กระดาษ เขียนคำตอบบนกระดาษคำตอบหรือสมุดแล้วส่งครูตามที่ครูนัด ครูจะบันทึกคะแนนให้เอง ไม่ต้องส่งในแอป')); return; }
   /* the form, with a draft kept on this device so leaving the page loses nothing */
-  const dkey = 'tp-hwd-' + a.id, dr = hwLS(dkey, {});
+  const dkey = 'tp-hwd-' + a.id; let dr = hwLS(dkey, {});
+  /* editing what was handed in (owner's request 25 Nov 2026): the answers and notebook pages sent last time from this
+     device by this same learner come back, so the hand-in is changed rather than done again from nothing. Only for a
+     learner the class roster identified: work without a class cannot tell two learners of one shared iPad apart */
+  const ckey = 'tp-hws-' + a.id, sc = hweSentCopyOn() && hsid && g && !part && !dr.answers && !dr.pages ? hwLS(ckey, null) : null;
+  const edit = !!(sc && sc.w === hsid);
+  if (edit) dr = { answers: sc.answers || {}, pages: sc.pages || {} };
   const st = { answers: dr.answers || {}, t0: now(), att: {} };
   for (const [k, l] of Object.entries(dr.pages || {})) st.att[k] = l.filter((x) => x && x.pid).map((x) => ({ kind: 'page', pid: x.pid, label: x.label || '' }));
+  if (edit) b.appendChild(exEl('div', 'note advice hwedit1', '<b>แก้ไขการส่ง</b><br>' + esc('คำตอบที่ส่งไปขึ้นไว้ให้แล้ว แก้แล้วกด ส่งฉบับที่แก้ ครูใช้ฉบับล่าสุด' + (sc.files ? ' รูปหรือไฟล์ที่แนบครั้งก่อน ' + sc.files + ' รายการต้องแนบอีกครั้ง' : ''))));
   const saveDraft = () => { const pages = {}; for (const [k, l] of Object.entries(st.att)) { const p = l.filter((x) => x.kind === 'page').map((x) => ({ pid: x.pid, label: x.label })); if (p.length) pages[k] = p; } store_ls.set(dkey, JSON.stringify({ answers: st.answers, pages, at: now() })); };
   let nm = null;
   if (!stu) { const f = exEl('label', 'field', '<span>ชื่อ นามสกุล หรือ ชื่อเล่นกับเลขที่</span>'); nm = document.createElement('input'); nm.maxLength = 60; nm.value = store_ls.get('tp-sname') || ''; f.appendChild(nm); b.appendChild(f); }
@@ -271,7 +283,7 @@ async function hwStudentOpen(id, termCls, opt) {
   if (A.files && !part && !(A.ver === 2 && nWork === qs.length)) { const h = exEl('div', 'sqq hwq'); h.appendChild(exEl('div', 'hwqh', '<b>' + (A.ver === 2 ? 'แนบงานทั้งชุด (ถ้ามี)' : 'แนบกระดาษคำตอบหรือไฟล์') + '</b>')); h.appendChild(exEl('div', 'note small', 'เช่น รูปกระดาษคำตอบที่ทำทั้งชุด ถ่ายให้เห็นทั้งหน้า แสงพอ ตัวหนังสือชัด')); h.appendChild(attachZone('_all', 'งานที่แนบ')); b.appendChild(h); }
   /* the bar that follows: how much is done, and hand in */
   const bar = exEl('div', 'hwbar'), pg = exEl('div', 'hwbp'), res = exEl('div', '');
-  const go = exEl('button', 'btn solid', part ? 'ส่งข้อที่เพิ่ม' : g ? 'ส่งฉบับใหม่' : 'ส่งงาน'); go.type = 'button';
+  const go = exEl('button', 'btn solid', part ? 'ส่งข้อที่เพิ่ม' : g ? (hweSentCopyOn() ? 'ส่งฉบับที่แก้' : 'ส่งฉบับใหม่') : 'ส่งงาน'); go.type = 'button';
   bar.append(pg, go);
   const need = () => {
     const noAns = [], noWork = [];
@@ -318,7 +330,8 @@ async function hwStudentOpen(id, termCls, opt) {
       if (part) { row.data.part = view.map((q) => q.id); const ans = {}; for (const q of view) if (st.answers[q.id]) ans[q.id] = st.answers[q.id]; row.data.answers = ans; } /* only the added questions: the teacher lays them over the earlier hand-in */
       if (eon && (A.chg || []).length) row.data.ack = A.chg.map((c) => c.id); /* handing in after the change has been shown counts as having read it */
       const { error: ie } = await sb.from('submissions').insert(row); if (ie) throw ie;
-      W8.stop(); hwReceiptAdd(a.id, sid, stu); store_ls.del(dkey); if (row.data.ack) hweSeenAdd(a.id, row.data.ack, stu);
+      W8.stop(); hwReceiptAdd(a.id, sid, stu); store_ls.del(dkey);
+      if (hweSentCopyOn() && hsid && !part) { const pages = {}; let files = 0; for (const [k, l] of Object.entries(st.att)) for (const x of l) { if (x.kind === 'page') (pages[k] = pages[k] || []).push({ pid: x.pid, label: x.label }); else files++; } store_ls.set(ckey, JSON.stringify({ w: hsid, answers: st.answers, pages, files, at: now() })); } if (row.data.ack) hweSeenAdd(a.id, row.data.ack, stu);
       for (const l of Object.values(st.att)) for (const x of l) if (x.url) URL.revokeObjectURL(x.url);
       hwDoneCard(sb, a, sid, name, paths.length, st, stu, termCls);
     } catch (e) { W8.stop(); go.disabled = false; res.innerHTML = '<div class="note err">' + esc(e && /หน้าสมุด/.test(e.message || '') ? e.message : hwErrText(e)) + '</div>'; }
@@ -338,7 +351,7 @@ async function hwDoneCard(sb, a, sid, name, nf, st, stu, termCls) {
   b.appendChild(c);
   const r = exEl('div', 'row2');
   const hub = exEl('button', 'btn solid', 'ดูงานทั้งหมดของฉัน'); hub.onclick = () => { const cl = termCls || A.clsId; location.hash = cl ? 'term=' + cl : 'mywork'; hwHubOpen(cl || null); };
-  const again = exEl('button', 'btn', 'แก้แล้วส่งใหม่'); again.onclick = () => hwStudentOpen(a.id, termCls);
+  const again = exEl('button', 'btn', hweSentCopyOn() ? 'แก้ไขการส่ง' : 'แก้แล้วส่งใหม่'); again.onclick = () => hwStudentOpen(a.id, termCls);
   r.append(hub, again); b.appendChild(r);
   b.appendChild(exEl('div', 'note small', 'ส่งใหม่ได้จนถึงกำหนดส่ง ครูใช้ฉบับล่าสุด'));
   if (A.instant) {
@@ -433,7 +446,8 @@ function hwAssignOpen(set) {
   dueIn.oninput = () => { dc.querySelectorAll('.chip').forEach((c) => c.setAttribute('aria-pressed', 'false')); dueSay(); }; dueSay();
   /* when learners see it (fix 24 Nov 2026): set while preparing, seen after the lesson, so it is neither done before nor during it */
   HW.show = null;
-  if (hwShowOn()) {
+  if (hwShowOn() && !planOn('hwshow')) b.appendChild(planLock('hwshow')); /* task 4.1: shown at once */
+  if (hwShowOn() && planOn('hwshow')) {
     const sf = exEl('div', 'field hwshow'); sf.innerHTML = '<span>ผู้เรียนเห็นงานนี้เมื่อ</span>'; b.appendChild(sf);
     const SH = [['now', 'ทันที'], ['end', 'หลังปิดห้องเรียนสด'], ['at', 'ตั้งเวลา']];
     let mode = store_ls.get('tp-hwshow'); if (!SH.some((x) => x[0] === mode)) mode = 'now';
@@ -886,6 +900,8 @@ async function hweOpen(a) {
   try { const { data: f } = await CLOUD.client.from('assignments').select('id,title,data,due,open,created_at').eq('id', a.id).maybeSingle(); if (f) Object.assign(a, f); } catch (e) { /* the copy in the list */ }
   const A = a.data || {}, old = a.due ? Date.parse(a.due) : null, c0 = A.clsId && CLS.list.find((x) => x.id === A.clsId);
   const st = { add: [], extAll: undefined, stu: new Set() };
+  /* task 4.1: questions added, more time for one learner and a word to the learners are of the presenter plan; moving the due time and more time for the whole class are free */
+  const more = typeof planOn !== 'function' || planOn('hwmore');
   let nSent = null; try { nSent = (await hwLoadSubs(a.id)).length; } catch (e) { /* count unknown */ }
   const box = exEl('div', 'hwext'); box.setAttribute('role', 'dialog'); box.setAttribute('aria-label', 'แก้ไขการบ้าน');
   const p = exEl('div', 'hwextp hwedp', '<b>แก้ไขการบ้าน</b>'); box.appendChild(p);
@@ -922,7 +938,7 @@ async function hweOpen(a) {
   extRow.append(bAll, xAll);
   const roster = c0 ? (c0.roster || []).slice().sort((x, y) => x.no - y.no) : [];
   let stuIn = null;
-  if (roster.length) {
+  if (roster.length && more) {
     const bStu = exEl('button', 'btn', 'ขยายเวลารายคน'); bStu.type = 'button'; extRow.appendChild(bStu);
     const sb = exEl('div', 'hwedstu'); sb.hidden = true; p.appendChild(sb);
     stuIn = document.createElement('input'); stuIn.type = 'datetime-local'; stuIn.setAttribute('aria-label', 'ขยายเวลารายคนถึง'); stuIn.value = toLocal(Math.max(old || 0, now()) + HW_DAY);
@@ -934,7 +950,7 @@ async function hweOpen(a) {
   }
   extSay();
   /* questions or pages added at the end */
-  sec('เพิ่มข้อหรือหน้าที่ต้องทำ (ต่อท้าย ข้อเดิมไม่เปลี่ยน)');
+  const hAdd = sec('เพิ่มข้อหรือหน้าที่ต้องทำ (ต่อท้าย ข้อเดิมไม่เปลี่ยน)');
   const addL = exEl('div', 'hwqm'); p.appendChild(addL);
   const n0 = (A.qs || []).length;
   const drawAdd = () => {
@@ -987,9 +1003,11 @@ async function hweOpen(a) {
     pickHost.append(fq, fc, fa, ok); tq.focus();
   };
   drawAdd();
+  if (!more) [hAdd, addL, addRow, pickHost].forEach((x) => { x.style.display = 'none'; });
   /* a word to the learners */
-  sec('ข้อความถึงนักเรียน (ไม่บังคับ)');
+  const hMsg = sec('ข้อความถึงนักเรียน (ไม่บังคับ)');
   const mg = document.createElement('textarea'); mg.rows = 2; mg.maxLength = 300; mg.id = 'hweMsg'; mg.className = 'hwedmsg'; mg.setAttribute('aria-label', 'ข้อความถึงนักเรียน'); mg.placeholder = 'เช่น เลื่อนส่งเพราะติดกิจกรรมโรงเรียน'; p.appendChild(mg);
+  if (!more) { hMsg.style.display = 'none'; mg.style.display = 'none'; p.appendChild(planLock('hwmore')); }
   p.appendChild(exEl('div', 'note small', 'เลื่อนเวลาส่ง ขยายเวลาทั้งห้อง เพิ่มข้อ หรือฝากข้อความ นักเรียนจะเห็นแถบ ครูแก้การบ้านนี้ และกดรับทราบ ครูดูได้ในหน้ารายละเอียดของงานว่าใครรับทราบแล้ว'));
   const msg = exEl('div', ''); p.appendChild(msg);
   const r = exEl('div', 'row2'), ok = exEl('button', 'btn solid', 'บันทึก'), no = exEl('button', 'btn', 'ยกเลิก'); ok.type = 'button'; no.type = 'button';
