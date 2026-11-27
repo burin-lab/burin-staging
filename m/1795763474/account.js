@@ -81,7 +81,7 @@ function acForgot() {
     send.disabled = true; acSay('กำลังส่งรหัส');
     try {
       const sb = await cloudClient(), cap = await capToken();
-      const o = { redirectTo: location.origin + location.pathname }; if (cap) o.captchaToken = cap;
+      const o = { redirectTo: siteBase() }; if (cap) o.captchaToken = cap;
       const r = await sb.auth.resetPasswordForEmail(email, o);
       if (r.error) throw r.error;
       AC.email = email; AC.wait = Date.now() + 60e3; verified = false; box.hidden = false;
