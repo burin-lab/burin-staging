@@ -23,6 +23,8 @@ function keepIos() {
   return /iPad|iPhone|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
 }
 function keepStandalone() {
+  /* the installed app (task 6.1) keeps its notebooks as an app does: Safari's clearing does not apply, nothing to add */
+  if (window.BurinShell) return true;
   try { return !!(navigator.standalone || matchMedia('(display-mode: standalone)').matches || matchMedia('(display-mode: fullscreen)').matches); } catch (e) { return false; }
 }
 function keepLocal() { return !!(S.store && S.store.kind === 'local' && typeof S.store.keys === 'function'); }
