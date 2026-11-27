@@ -7,12 +7,12 @@
 <title>BURIN ตรวจว่าไม่ใช่บอต</title>
 <!--
  The bot check of the installed app (task 6.1). Cloudflare Turnstile works only on the addresses its site key is
- registered for, and the app's own page is at capacitor://localhost. So the app shows this small page of the site,
+ registered for, and the app's own page is at capacitor://localhost (iPad) or https://localhost (Android, task 6.2). So the app shows this small page of the site,
  where the key works:
    - in an iframe inside the sign-in form (the app first says hello with postMessage; the answer goes back only to
      that page, and only when it is the app or this site itself)
    - or, when that does not work, as a page of its own in a sheet of the app (?app=1): the answer goes to the app
-     through window.webkit.messageHandlers.burinCap
+     through window.webkit.messageHandlers.burinCap (iPad) or window.burinCap (Android, a JSON string)
  Messages to the page that opened it: { burinCap: 1, t: 'ready' | 'token' | 'expired' | 'error', v, h }
  (h is the height of the widget, for the iframe). The site key is turnstileKey in config.js of this site.
 -->
@@ -40,14 +40,17 @@
   var parentOrigin = '', queue = [], wid = null;
   if (app) document.body.className = 'app';
   function okOrigin(o) {
-    /* the app (capacitor or ionic scheme), this site, and a page on this computer (the tests) */
-    return /^(capacitor|ionic):\/\/localhost$/.test(o) || o === location.origin || /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(o);
+    /* the app (capacitor or ionic scheme on the iPad, https://localhost on Android), this site, and a page on this computer (the tests) */
+    return /^(capacitor|ionic):\/\/localhost$/.test(o) || o === 'https://localhost' || o === location.origin || /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(o);
   }
   function height() { var w = document.getElementById('w'); return Math.ceil((w && w.getBoundingClientRect().height) || 65); }
   function send(t, v) {
     var m = { burinCap: 1, t: t, v: v || '', h: height() };
     if (app) {
-      try { window.webkit.messageHandlers.burinCap.postMessage(m); } catch (e) { /* not in the app */ }
+      try {
+        if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.burinCap) window.webkit.messageHandlers.burinCap.postMessage(m);
+        else if (window.burinCap && typeof window.burinCap.postMessage === 'function') window.burinCap.postMessage(JSON.stringify(m));
+      } catch (e) { /* not in the app */ }
       return;
     }
     if (window.parent === window) return;
